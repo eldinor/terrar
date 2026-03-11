@@ -1,6 +1,7 @@
 import { ProceduralGenerator } from "./ProceduralGenerator";
 import { classifyTerrainBiome, TerrainBiome } from "./TerrainBiome";
 import { TerrainConfig, TerrainLODLevel } from "./TerrainConfig";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 export interface TerrainSampleGrid {
   readonly resolution: number;
@@ -46,6 +47,16 @@ export class TerrainChunkData {
       throw new Error(`Missing terrain grid for LOD ${lod}.`);
     }
     return grid;
+  }
+
+  sampleSurfaceNormal(x: number, z: number, sampleStep: number): Vector3 {
+    const left = this.generator.sample(x - sampleStep, z).height;
+    const right = this.generator.sample(x + sampleStep, z).height;
+    const down = this.generator.sample(x, z - sampleStep).height;
+    const up = this.generator.sample(x, z + sampleStep).height;
+    const gradientX = (right - left) / (sampleStep * 2);
+    const gradientZ = (up - down) / (sampleStep * 2);
+    return new Vector3(-gradientX, 1, -gradientZ).normalize();
   }
 
   private generateAllLods(): ReadonlyMap<TerrainLODLevel, TerrainSampleGrid> {

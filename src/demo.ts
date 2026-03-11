@@ -1,4 +1,8 @@
 import type { TerrainConfigOverrides, TerrainShapeConfig } from "./terrain/TerrainConfig";
+import {
+  TerrainDebugViewMode,
+  TerrainLayerThresholds
+} from "./terrain/materials";
 import { createTerrainDemo } from "./main";
 
 interface TerrainPreset {
@@ -202,6 +206,75 @@ function renderPanel(): void {
       renderPanel();
     })
   );
+  panel.appendChild(createDebugModeControl());
+  panel.appendChild(createDivider());
+  panel.appendChild(createSectionLabel("Material Blend"));
+  panel.appendChild(
+    createSlider("Rock Start", 0.05, 0.9, 0.01, draftConfig.materialThresholds.rockSlopeStart, (value) => {
+      draftConfig.materialThresholds.rockSlopeStart = Math.min(
+        value,
+        draftConfig.materialThresholds.rockSlopeFull - 0.02
+      );
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      renderPanel();
+    })
+  );
+  panel.appendChild(
+    createSlider("Rock Full", 0.1, 1, 0.01, draftConfig.materialThresholds.rockSlopeFull, (value) => {
+      draftConfig.materialThresholds.rockSlopeFull = Math.max(
+        value,
+        draftConfig.materialThresholds.rockSlopeStart + 0.02
+      );
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      renderPanel();
+    })
+  );
+  panel.appendChild(
+    createSlider("Grass Max Slope", 0.1, 0.9, 0.01, draftConfig.materialThresholds.grassMaxSlope, (value) => {
+      draftConfig.materialThresholds.grassMaxSlope = value;
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+    })
+  );
+  panel.appendChild(
+    createSlider("Snow Start", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.snowStartHeight, (value) => {
+      draftConfig.materialThresholds.snowStartHeight = Math.min(
+        value,
+        draftConfig.materialThresholds.snowFullHeight - 1
+      );
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      renderPanel();
+    })
+  );
+  panel.appendChild(
+    createSlider("Snow Full", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.snowFullHeight, (value) => {
+      draftConfig.materialThresholds.snowFullHeight = Math.max(
+        value,
+        draftConfig.materialThresholds.snowStartHeight + 1
+      );
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      renderPanel();
+    })
+  );
+  panel.appendChild(
+    createSlider("Dirt Low", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.dirtLowHeight, (value) => {
+      draftConfig.materialThresholds.dirtLowHeight = Math.min(
+        value,
+        draftConfig.materialThresholds.dirtHighHeight - 1
+      );
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      renderPanel();
+    })
+  );
+  panel.appendChild(
+    createSlider("Dirt High", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.dirtHighHeight, (value) => {
+      draftConfig.materialThresholds.dirtHighHeight = Math.max(
+        value,
+        draftConfig.materialThresholds.dirtLowHeight + 1
+      );
+      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      renderPanel();
+    })
+  );
 
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Regenerate"));
@@ -325,6 +398,51 @@ function createPresetControls(): HTMLElement {
   return wrap;
 }
 
+function createDebugModeControl(): HTMLElement {
+  const row = document.createElement("label");
+  row.style.display = "grid";
+  row.style.gap = "4px";
+  row.style.marginTop = "8px";
+
+  const title = document.createElement("div");
+  title.textContent = "Terrain View";
+
+  const select = document.createElement("select");
+  select.style.width = "100%";
+  select.style.padding = "6px 8px";
+  select.style.borderRadius = "8px";
+  select.style.border = "1px solid rgba(255,255,255,0.16)";
+  select.style.background = "rgba(14, 21, 29, 0.95)";
+  select.style.color = "#f4edc9";
+
+  const modes: readonly [string, TerrainDebugViewMode][] = [
+    ["Final", TerrainDebugViewMode.Final],
+    ["Grass Weight", TerrainDebugViewMode.GrassWeight],
+    ["Dirt Weight", TerrainDebugViewMode.DirtWeight],
+    ["Rock Weight", TerrainDebugViewMode.RockWeight],
+    ["Snow Weight", TerrainDebugViewMode.SnowWeight],
+    ["Height", TerrainDebugViewMode.Height],
+    ["Slope", TerrainDebugViewMode.Slope],
+    ["Triplanar Blend", TerrainDebugViewMode.TriplanarBlend]
+  ];
+
+  modes.forEach(([label, value]) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = label;
+    option.selected = demo.getDebugViewMode() === value;
+    select.appendChild(option);
+  });
+
+  select.addEventListener("change", () => {
+    demo.setDebugViewMode(Number(select.value) as TerrainDebugViewMode);
+  });
+
+  row.appendChild(title);
+  row.appendChild(select);
+  return row;
+}
+
 function createActionButtons(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.style.display = "grid";
@@ -353,6 +471,7 @@ function applyDraftToWorld(): void {
   demo.setFoliageRadius(draftConfig.foliageRadius);
   demo.setLodDistances(draftConfig.lodDistances);
   demo.setWaterLevel(draftConfig.waterLevel);
+  demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
   debugVisible = false;
   renderHud();
   draftConfig = buildDraftConfig();
@@ -369,6 +488,7 @@ function buildDraftConfig(): DraftConfig {
     collisionRadius: demo.getCollisionRadius(),
     foliageRadius: demo.getFoliageRadius(),
     lodDistances: [...demo.getLodDistances()] as [number, number, number],
+    materialThresholds: { ...demo.getTerrainMaterialThresholds() },
     shape: { ...config.shape }
   };
 }
@@ -400,6 +520,7 @@ function mergeDraftWithOverrides(
     lodDistances: (overrides.lodDistances
       ? [...overrides.lodDistances]
       : [...base.lodDistances]) as [number, number, number],
+    materialThresholds: { ...base.materialThresholds },
     shape: {
       ...base.shape,
       ...overrides.shape
@@ -552,6 +673,7 @@ interface DraftConfig {
   collisionRadius: number;
   foliageRadius: number;
   lodDistances: [number, number, number];
+  materialThresholds: TerrainLayerThresholds;
   shape: MutableTerrainShapeConfig;
 }
 

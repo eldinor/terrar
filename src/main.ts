@@ -6,6 +6,11 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TerrainConfig, TerrainConfigOverrides } from "./terrain/TerrainConfig";
 import { TerrainSystem } from "./terrain/TerrainSystem";
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
+import {
+  TerrainDebugViewMode,
+  TerrainLayerThresholds,
+  TerrainMaterialConfig
+} from "./terrain/materials";
 
 export interface TerrainDemo {
   readonly engine: Engine;
@@ -22,6 +27,12 @@ export interface TerrainDemo {
   readonly getFoliageRadius: () => number;
   readonly setLodDistances: (distances: readonly [number, number, number]) => void;
   readonly getLodDistances: () => readonly [number, number, number];
+  readonly setDebugViewMode: (mode: TerrainDebugViewMode) => void;
+  readonly getDebugViewMode: () => TerrainDebugViewMode;
+  readonly setTerrainMaterialConfig: (config: TerrainMaterialConfig) => void;
+  readonly getTerrainMaterialConfig: () => TerrainMaterialConfig;
+  readonly setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) => void;
+  readonly getTerrainMaterialThresholds: () => TerrainLayerThresholds;
   readonly rebuildTerrain: (overrides: TerrainConfigOverrides) => void;
   readonly getTerrainConfig: () => TerrainConfig;
   readonly getFoliageStats: () => TerrainFoliageStats;
@@ -83,8 +94,19 @@ export function createTerrainDemo(
     setLodDistances: (distances: readonly [number, number, number]) =>
       terrainSystem.setLodDistances(distances),
     getLodDistances: () => terrainSystem.getLodDistances(),
+    setDebugViewMode: (mode: TerrainDebugViewMode) =>
+      terrainSystem.setDebugViewMode(mode),
+    getDebugViewMode: () => terrainSystem.getDebugViewMode(),
+    setTerrainMaterialConfig: (config: TerrainMaterialConfig) =>
+      terrainSystem.setTerrainMaterialConfig(config),
+    getTerrainMaterialConfig: () => terrainSystem.getTerrainMaterialConfig(),
+    setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) =>
+      terrainSystem.setTerrainMaterialThresholds(thresholds),
+    getTerrainMaterialThresholds: () => terrainSystem.getTerrainMaterialThresholds(),
     rebuildTerrain: (nextOverrides: TerrainConfigOverrides) => {
       const wireframe = terrainSystem.getWireframe();
+      const debugViewMode = terrainSystem.getDebugViewMode();
+      const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
       const config = terrainSystem.getConfig();
       const mergedOverrides: TerrainConfigOverrides = {
         ...config,
@@ -98,6 +120,8 @@ export function createTerrainDemo(
       terrainSystem = new TerrainSystem(scene, mergedOverrides);
       terrainSystem.initialize();
       terrainSystem.setWireframe(wireframe);
+      terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
+      terrainSystem.setDebugViewMode(debugViewMode);
       terrainSystem.update(camera.position);
     },
     getTerrainConfig: () => terrainSystem.getConfig(),

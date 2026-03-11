@@ -10,3 +10,4 @@ export * from "./TerrainMeshBuilder";
 export * from "./TerrainSystem";
 export * from "./TerrainWaterSystem";
 export * from "./ProceduralGenerator";
+export * from "./materials";

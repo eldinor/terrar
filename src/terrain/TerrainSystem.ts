@@ -17,6 +17,13 @@ import { TerrainLODController } from "./TerrainLODController";
 import { TerrainMeshBuilder } from "./TerrainMeshBuilder";
 import { TerrainWaterSystem } from "./TerrainWaterSystem";
 import type { TerrainDebugOverlay } from "./TerrainDebugOverlay";
+import {
+  cloneTerrainMaterialConfig,
+  TerrainDebugViewMode,
+  TerrainLayerThresholds,
+  TerrainMaterialConfig,
+  TerrainMaterialFactory
+} from "./materials";
 
 export class TerrainSystem {
   readonly config: TerrainConfig;
@@ -33,6 +40,8 @@ export class TerrainSystem {
   private lodDistances: [number, number, number];
   private collisionRadius: number;
   private foliageRadius: number;
+  private debugViewMode = TerrainDebugViewMode.Final;
+  private materialConfig: TerrainMaterialConfig | null = null;
   private elapsedTimeSeconds = 0;
   private initialized = false;
 
@@ -63,7 +72,8 @@ export class TerrainSystem {
       return;
     }
 
-    this.material = TerrainMeshBuilder.createSharedMaterial(this.scene);
+    this.material = TerrainMeshBuilder.createSharedMaterial(this.scene, this.config);
+    this.materialConfig = TerrainMaterialFactory.getConfig(this.material);
 
     for (let chunkZ = 0; chunkZ < this.config.chunksPerAxis; chunkZ += 1) {
       const row: TerrainChunk[] = [];
@@ -141,6 +151,8 @@ export class TerrainSystem {
     this.chunkGrid.length = 0;
     this.material?.dispose(false, true);
     this.material = null;
+    this.materialConfig = null;
+    this.debugViewMode = TerrainDebugViewMode.Final;
     this.elapsedTimeSeconds = 0;
     this.initialized = false;
   }
@@ -243,6 +255,49 @@ export class TerrainSystem {
 
   getFoliageStats(): TerrainFoliageStats {
     return this.foliageSystem.getStats();
+  }
+
+  setDebugViewMode(mode: TerrainDebugViewMode): void {
+    if (!this.material) {
+      throw new Error("TerrainSystem.initialize() must be called before setDebugViewMode().");
+    }
+
+    TerrainMaterialFactory.setDebugMode(this.material, mode);
+    if (this.materialConfig) {
+      this.materialConfig.debugMode = mode;
+    }
+    this.debugViewMode = mode;
+  }
+
+  getDebugViewMode(): TerrainDebugViewMode {
+    return this.debugViewMode;
+  }
+
+  setTerrainMaterialConfig(config: TerrainMaterialConfig): void {
+    if (!this.material) {
+      throw new Error("TerrainSystem.initialize() must be called before setTerrainMaterialConfig().");
+    }
+
+    TerrainMaterialFactory.applyConfig(this.material, config);
+    this.materialConfig = cloneTerrainMaterialConfig(config);
+    this.debugViewMode = config.debugMode as TerrainDebugViewMode;
+  }
+
+  getTerrainMaterialConfig(): TerrainMaterialConfig {
+    return cloneTerrainMaterialConfig(
+      this.materialConfig ??
+        TerrainMaterialFactory.getConfig(this.material!)!
+    );
+  }
+
+  setTerrainMaterialThresholds(thresholds: TerrainLayerThresholds): void {
+    const nextConfig = this.getTerrainMaterialConfig();
+    nextConfig.thresholds = { ...thresholds };
+    this.setTerrainMaterialConfig(nextConfig);
+  }
+
+  getTerrainMaterialThresholds(): TerrainLayerThresholds {
+    return { ...this.getTerrainMaterialConfig().thresholds };
   }
 
   private getDesiredLod(distance: number): TerrainLODLevel {

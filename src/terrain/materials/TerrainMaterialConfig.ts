@@ -1,0 +1,85 @@
+export interface TerrainLayerThresholds {
+  rockSlopeStart: number;
+  rockSlopeFull: number;
+  snowStartHeight: number;
+  snowFullHeight: number;
+  grassMaxSlope: number;
+  dirtLowHeight: number;
+  dirtHighHeight: number;
+}
+
+export interface TerrainTextureScaleConfig {
+  grassScale: number;
+  dirtScale: number;
+  rockScale: number;
+  snowScale: number;
+  macroScale: number;
+}
+
+export interface TerrainMaterialConfig {
+  thresholds: TerrainLayerThresholds;
+  scales: TerrainTextureScaleConfig;
+  blendSharpness: number;
+  triplanarSharpness: number;
+  normalStrength: number;
+  debugMode: number;
+}
+
+export const DEFAULT_TERRAIN_MATERIAL_CONFIG: TerrainMaterialConfig = Object.freeze({
+  thresholds: Object.freeze({
+    rockSlopeStart: 0.34,
+    rockSlopeFull: 0.82,
+    snowStartHeight: 92,
+    snowFullHeight: 138,
+    grassMaxSlope: 0.46,
+    dirtLowHeight: -24,
+    dirtHighHeight: 58
+  }),
+  scales: Object.freeze({
+    grassScale: 0.11,
+    dirtScale: 0.1,
+    rockScale: 0.08,
+    snowScale: 0.07,
+    macroScale: 0.008
+  }),
+  blendSharpness: 1.2,
+  triplanarSharpness: 4,
+  normalStrength: 1,
+  debugMode: 0
+});
+
+export function createTerrainMaterialConfigForHeightRange(
+  minHeight: number,
+  maxHeight: number
+): TerrainMaterialConfig {
+  const range = Math.max(maxHeight - minHeight, 1);
+
+  return {
+    ...DEFAULT_TERRAIN_MATERIAL_CONFIG,
+    thresholds: {
+      rockSlopeStart: 0.34,
+      rockSlopeFull: 0.82,
+      snowStartHeight: minHeight + range * 0.56,
+      snowFullHeight: minHeight + range * 0.76,
+      grassMaxSlope: 0.46,
+      dirtLowHeight: minHeight,
+      dirtHighHeight: minHeight + range * 0.34
+    },
+    scales: {
+      ...DEFAULT_TERRAIN_MATERIAL_CONFIG.scales
+    }
+  };
+}
+
+export function cloneTerrainMaterialConfig(
+  config: TerrainMaterialConfig
+): TerrainMaterialConfig {
+  return {
+    thresholds: { ...config.thresholds },
+    scales: { ...config.scales },
+    blendSharpness: config.blendSharpness,
+    triplanarSharpness: config.triplanarSharpness,
+    normalStrength: config.normalStrength,
+    debugMode: config.debugMode
+  };
+}

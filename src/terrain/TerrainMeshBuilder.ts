@@ -1,5 +1,4 @@
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Effect } from "@babylonjs/core/Materials/effect";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Scene } from "@babylonjs/core/scene";
@@ -8,6 +7,10 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TerrainChunkData, TerrainSampleGrid } from "./TerrainChunkData";
 import { TerrainBiome } from "./TerrainBiome";
 import { TerrainConfig, TerrainLODLevel } from "./TerrainConfig";
+import {
+  createTerrainMaterialConfigForHeightRange,
+  TerrainMaterialFactory
+} from "./materials";
 
 export class TerrainMeshBuilder {
   static buildChunkMesh(
@@ -32,24 +35,15 @@ export class TerrainMeshBuilder {
     return mesh;
   }
 
-  static createSharedMaterial(scene: Scene): ShaderMaterial {
-    ensureTerrainShadersRegistered();
-
-    const material = new ShaderMaterial(
-      "terrain-material",
+  static createSharedMaterial(scene: Scene, config: TerrainConfig): ShaderMaterial {
+    return TerrainMaterialFactory.createTerrainMaterial(
       scene,
-      "terrain",
-      {
-        attributes: ["position", "normal", "color"],
-        uniforms: ["world", "worldViewProjection", "lightDirection", "ambientColor", "lightColor"]
-      }
+      undefined,
+      createTerrainMaterialConfigForHeightRange(
+        config.baseHeight,
+        config.maxHeight
+      )
     );
-    material.backFaceCulling = false;
-    material.setVector3("lightDirection", new Vector3(-0.45, 0.9, 0.3).normalize());
-    material.setColor3("ambientColor", new Color3(0.42, 0.46, 0.5));
-    material.setColor3("lightColor", new Color3(1, 0.96, 0.9));
-    material.freeze();
-    return material;
   }
 
   private static createVertexData(
@@ -81,8 +75,10 @@ export class TerrainMeshBuilder {
         const worldX = chunkData.minX + x * step;
         const worldZ = chunkData.minZ + z * step;
         const height = heights[index];
+        const normal = chunkData.sampleSurfaceNormal(worldX, worldZ, step);
         positions.push(worldX, height, worldZ);
         uvs.push(x / (resolution - 1), z / (resolution - 1));
+        normals.push(normal.x, normal.y, normal.z);
         const color = pickVertexColor(
           height,
           slopes[index],
@@ -110,15 +106,9 @@ export class TerrainMeshBuilder {
     appendSkirt(
       positions,
       uvs,
+      normals,
       colors,
       indices,
-      heights,
-      slopes,
-      moisture,
-      temperature,
-      biomes,
-      shoreProximity,
-      waterDepth,
       chunkData,
       grid,
       config,
@@ -127,15 +117,9 @@ export class TerrainMeshBuilder {
     appendSkirt(
       positions,
       uvs,
+      normals,
       colors,
       indices,
-      heights,
-      slopes,
-      moisture,
-      temperature,
-      biomes,
-      shoreProximity,
-      waterDepth,
       chunkData,
       grid,
       config,
@@ -144,15 +128,9 @@ export class TerrainMeshBuilder {
     appendSkirt(
       positions,
       uvs,
+      normals,
       colors,
       indices,
-      heights,
-      slopes,
-      moisture,
-      temperature,
-      biomes,
-      shoreProximity,
-      waterDepth,
       chunkData,
       grid,
       config,
@@ -161,22 +139,14 @@ export class TerrainMeshBuilder {
     appendSkirt(
       positions,
       uvs,
+      normals,
       colors,
       indices,
-      heights,
-      slopes,
-      moisture,
-      temperature,
-      biomes,
-      shoreProximity,
-      waterDepth,
       chunkData,
       grid,
       config,
       "east"
     );
-
-    VertexData.ComputeNormals(positions, indices, normals);
 
     const vertexData = new VertexData();
     vertexData.positions = positions;
@@ -188,72 +158,30 @@ export class TerrainMeshBuilder {
   }
 }
 
-function ensureTerrainShadersRegistered(): void {
-  if (Effect.ShadersStore.terrainVertexShader) {
-    return;
-  }
-
-  Effect.ShadersStore.terrainVertexShader = `
-    precision highp float;
-
-    attribute vec3 position;
-    attribute vec3 normal;
-    attribute vec4 color;
-
-    uniform mat4 world;
-    uniform mat4 worldViewProjection;
-
-    varying vec3 vNormalW;
-    varying vec4 vColor;
-
-    void main(void) {
-      vec4 worldPosition = world * vec4(position, 1.0);
-      vNormalW = normalize(mat3(world) * normal);
-      vColor = color;
-      gl_Position = worldViewProjection * vec4(position, 1.0);
-    }
-  `;
-
-  Effect.ShadersStore.terrainFragmentShader = `
-    precision highp float;
-
-    uniform vec3 lightDirection;
-    uniform vec3 ambientColor;
-    uniform vec3 lightColor;
-
-    varying vec3 vNormalW;
-    varying vec4 vColor;
-
-    void main(void) {
-      vec3 normalW = normalize(vNormalW);
-      float diffuse = max(dot(normalW, normalize(lightDirection)), 0.0);
-      float wrappedDiffuse = diffuse * 0.75 + 0.25;
-      vec3 litColor = vColor.rgb * (ambientColor + lightColor * wrappedDiffuse);
-      gl_FragColor = vec4(litColor, vColor.a);
-    }
-  `;
-}
-
 type Edge = "north" | "south" | "west" | "east";
 
 function appendSkirt(
   positions: number[],
   uvs: number[],
+  normals: number[],
   colors: number[],
   indices: number[],
-  heights: Float32Array,
-  slopes: Float32Array,
-  moisture: Float32Array,
-  temperature: Float32Array,
-  biomes: Uint8Array,
-  shoreProximity: Float32Array,
-  waterDepth: Float32Array,
   chunkData: TerrainChunkData,
   grid: TerrainSampleGrid,
   config: TerrainConfig,
   edge: Edge
 ): void {
-  const { resolution, step } = grid;
+  const {
+    resolution,
+    step,
+    heights,
+    slopes,
+    moisture,
+    temperature,
+    biomes,
+    shoreProximity,
+    waterDepth
+  } = grid;
   const topIndices: number[] = [];
   const skirtIndices: number[] = [];
 
@@ -271,6 +199,9 @@ function appendSkirt(
 
     positions.push(worldX, height - config.skirtDepth, worldZ);
     uvs.push(x / (resolution - 1), z / (resolution - 1));
+    const topNormal = Vector3.FromArray(normals, gridIndex * 3);
+    const skirtNormal = createSkirtNormal(topNormal, edge);
+    normals.push(skirtNormal.x, skirtNormal.y, skirtNormal.z);
 
     const color = pickVertexColor(
       height,
@@ -297,6 +228,19 @@ function appendSkirt(
       indices.push(topA, topB, skirtA, topB, skirtB, skirtA);
     }
   }
+}
+
+function createSkirtNormal(topNormal: Vector3, edge: Edge): Vector3 {
+  const outward =
+    edge === "north"
+      ? new Vector3(0, -0.35, -1)
+      : edge === "south"
+        ? new Vector3(0, -0.35, 1)
+        : edge === "west"
+          ? new Vector3(-1, -0.35, 0)
+          : new Vector3(1, -0.35, 0);
+
+  return topNormal.scale(0.35).add(outward.scale(0.65)).normalize();
 }
 
 function pickVertexColor(

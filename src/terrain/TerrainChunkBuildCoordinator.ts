@@ -27,6 +27,7 @@ interface PendingChunkJob {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly lods: readonly TerrainLODLevel[];
+  readonly priority: number;
 }
 
 interface ActiveWorkerState {
@@ -81,6 +82,7 @@ export class TerrainChunkBuildCoordinator {
     config: TerrainConfig,
     roads: readonly TerrainRoad[],
     snapshot: PackedTerrainSnapshot,
+    cameraPosition: Vector3 | null,
     buildVersion: number,
     onChunkBuilt: (
       chunkX: number,
@@ -90,7 +92,7 @@ export class TerrainChunkBuildCoordinator {
     onProgress?: (progress: TerrainChunkBuildProgress) => void
   ): Promise<void> {
     this.activeBuildVersion = buildVersion;
-    const queue = buildChunkQueue(config);
+    const queue = buildChunkQueue(config, cameraPosition);
     const totalChunks = queue.length;
 
     if (this.workers.length === 0 || typeof Worker === "undefined") {
@@ -260,15 +262,48 @@ export class TerrainChunkBuildCoordinator {
   }
 }
 
-function buildChunkQueue(config: TerrainConfig): PendingChunkJob[] {
+function buildChunkQueue(
+  config: TerrainConfig,
+  cameraPosition: Vector3 | null
+): PendingChunkJob[] {
   const lods = config.lodResolutions.map((_, index) => index as TerrainLODLevel);
   const queue: PendingChunkJob[] = [];
   for (let chunkZ = 0; chunkZ < config.chunksPerAxis; chunkZ += 1) {
     for (let chunkX = 0; chunkX < config.chunksPerAxis; chunkX += 1) {
-      queue.push({ chunkX, chunkZ, lods });
+      queue.push({
+        chunkX,
+        chunkZ,
+        lods,
+        priority: computeChunkPriority(
+          config,
+          chunkX,
+          chunkZ,
+          cameraPosition
+        )
+      });
     }
   }
+  queue.sort((left, right) => left.priority - right.priority);
   return queue;
+}
+
+function computeChunkPriority(
+  config: TerrainConfig,
+  chunkX: number,
+  chunkZ: number,
+  cameraPosition: Vector3 | null
+): number {
+  const stableTieBreak = chunkZ * config.chunksPerAxis + chunkX;
+  if (!cameraPosition) {
+    return stableTieBreak;
+  }
+
+  const halfChunkSize = config.chunkSize * 0.5;
+  const centerX = config.worldMin + chunkX * config.chunkSize + halfChunkSize;
+  const centerZ = config.worldMin + chunkZ * config.chunkSize + halfChunkSize;
+  const dx = centerX - cameraPosition.x;
+  const dz = centerZ - cameraPosition.z;
+  return dx * dx + dz * dz + stableTieBreak * 1e-3;
 }
 
 function serializeRoads(roads: readonly TerrainRoad[]): SerializedTerrainRoad[] {

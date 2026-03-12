@@ -88,6 +88,8 @@ export interface TerrainWorkerStatus {
   readonly crossOriginIsolated: boolean;
   readonly sharedArrayBufferDefined: boolean;
   readonly snapshotMode: "shared" | "copied" | "main-thread";
+  readonly pendingChunkMeshes: number;
+  readonly applyingChunkMeshes: boolean;
 }
 
 export function createTerrainDemo(
@@ -134,9 +136,13 @@ export function createTerrainDemo(
     buildStatusListeners.forEach((listener) => listener(status));
   };
 
-  const createBuildOptions = (version: number): TerrainSystemBuildOptions => ({
+  const createBuildOptions = (
+    version: number,
+    initialCameraPosition: Vector3 = camera.position.clone()
+  ): TerrainSystemBuildOptions => ({
     chunkBuildCoordinator,
     chunkBuildVersion: version,
+    initialCameraPosition,
     onChunkBuildProgress: (progress) => {
       if (version !== buildVersion) {
         return;
@@ -156,7 +162,7 @@ export function createTerrainDemo(
     overrides,
     textureOptions,
     null,
-    createBuildOptions(buildVersion)
+    createBuildOptions(buildVersion, camera.position.clone())
   );
   frameCameraToWorld(camera, terrainSystem.getConfig());
   terrainSystem.initialize();
@@ -262,14 +268,14 @@ export function createTerrainDemo(
     }
 
     terrainSystem.dispose();
+    frameCameraToWorld(camera, nextConfig);
     terrainSystem = new TerrainSystem(
       scene,
       nextConfig,
       nextTextureOptions,
       prebuiltWorld,
-      createBuildOptions(nextBuildVersion)
+      createBuildOptions(nextBuildVersion, camera.position.clone())
     );
-    frameCameraToWorld(camera, nextConfig);
     terrainSystem.initialize();
     terrainSystem.setWireframe(wireframe);
     terrainSystem.setCollisionRadius(
@@ -369,7 +375,9 @@ export function createTerrainDemo(
         ? "main-thread"
         : sharedSnapshotsEnabled
           ? "shared"
-          : "copied"
+          : "copied",
+      pendingChunkMeshes: terrainSystem.getPendingChunkMeshCount(),
+      applyingChunkMeshes: terrainSystem.isApplyingChunkMeshes()
     })
   };
 }

@@ -93,8 +93,6 @@ const demo = createTerrainDemo(canvas);
 type PanelTab = "runtime" | "material" | "world" | "presets";
 let buildStatus = demo.getBuildStatus();
 let featureBuildStatusText: HTMLDivElement | null = null;
-const workerStatus = demo.getWorkerStatus();
-
 const hud = document.createElement("div");
 hud.style.position = "fixed";
 hud.style.top = "16px";
@@ -161,6 +159,7 @@ function renderHud(): void {
   const foliage = demo.getFoliageStats();
   const poi = demo.getPoiStats();
   const roads = demo.getRoadStats();
+  const workerStatus = demo.getWorkerStatus();
   const workerText = workerStatus.sharedSnapshotsEnabled
     ? "sab:on"
     : workerStatus.workersEnabled
@@ -1020,6 +1019,7 @@ function updateFeatureBuildStatus(): void {
       ? "POI and roads will rebuild into the world."
       : "POI will load on rebuild. Roads remain disabled."
     : "POI and roads are excluded by default.";
+  const workerStatus = demo.getWorkerStatus();
   const workerLine = workerStatus.workersEnabled
     ? workerStatus.sharedSnapshotsEnabled
       ? "Workers active. Shared snapshots enabled."
@@ -1028,7 +1028,9 @@ function updateFeatureBuildStatus(): void {
   const workerDetail =
     `crossOriginIsolated: ${workerStatus.crossOriginIsolated}\n` +
     `SharedArrayBuffer: ${workerStatus.sharedArrayBufferDefined}\n` +
-    `Snapshot Mode: ${workerStatus.snapshotMode}`;
+    `Snapshot Mode: ${workerStatus.snapshotMode}\n` +
+    `Mesh Apply: ${workerStatus.applyingChunkMeshes ? "active" : "idle"}\n` +
+    `Pending Chunk Meshes: ${workerStatus.pendingChunkMeshes}`;
   const progress =
     buildStatus.phase === "idle"
       ? ""

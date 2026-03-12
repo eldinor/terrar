@@ -1,5 +1,6 @@
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { createYieldingScheduler, runCoroutineAsync } from "@babylonjs/core/Misc/coroutine";
 import { Scene } from "@babylonjs/core/scene";
 import { ProceduralGenerator } from "./ProceduralGenerator";
 import { TerrainChunkData } from "./TerrainChunkData";
@@ -19,7 +20,7 @@ import { packTerrainSnapshot } from "./TerrainSnapshotLayout";
 import { TerrainFoliageCandidate, TerrainFoliagePlanner } from "./TerrainFoliagePlanner";
 import { TerrainFoliageStats, TerrainFoliageSystem } from "./TerrainFoliageSystem";
 import { TerrainLODController } from "./TerrainLODController";
-import { TerrainMeshBuilder } from "./TerrainMeshBuilder";
+import { TerrainChunkMeshData, TerrainMeshBuilder } from "./TerrainMeshBuilder";
 import { TerrainPoi, TerrainPoiPlanner } from "./TerrainPoiPlanner";
 import {
   DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
@@ -74,6 +75,9 @@ export class TerrainSystem {
   private initialized = false;
   private disposed = false;
   private chunkBuildPromise: Promise<void> | null = null;
+  private pendingChunkMeshQueue: PendingChunkMeshBuild[] = [];
+  private chunkMeshApplyPromise: Promise<void> | null = null;
+  private chunkMeshApplyAbortController: AbortController | null = null;
 
   constructor(
     private readonly scene: Scene,
@@ -257,6 +261,10 @@ export class TerrainSystem {
 
   dispose(): void {
     this.disposed = true;
+    this.chunkMeshApplyAbortController?.abort();
+    this.chunkMeshApplyAbortController = null;
+    this.pendingChunkMeshQueue = [];
+    this.chunkMeshApplyPromise = null;
     this.debugOverlay?.dispose();
     this.debugOverlay = null;
     this.debugOverlayPromise = null;
@@ -278,6 +286,14 @@ export class TerrainSystem {
 
   whenChunkMeshesReady(): Promise<void> {
     return this.chunkBuildPromise ?? Promise.resolve();
+  }
+
+  getPendingChunkMeshCount(): number {
+    return this.pendingChunkMeshQueue.length;
+  }
+
+  isApplyingChunkMeshes(): boolean {
+    return this.chunkMeshApplyPromise !== null;
   }
 
   async createDebugOverlay(): Promise<void> {
@@ -539,32 +555,26 @@ export class TerrainSystem {
     }
 
     try {
+      this.chunkMeshApplyAbortController?.abort();
+      this.chunkMeshApplyAbortController = new AbortController();
+      this.pendingChunkMeshQueue = [];
+      this.chunkMeshApplyPromise = null;
       await coordinator.buildChunks(
         this.config,
         roads,
         this.prebuiltWorld?.packedSnapshot ?? packTerrainSnapshot(this.generator.createSnapshot()),
+        this.buildOptions.initialCameraPosition ?? null,
         this.buildOptions.chunkBuildVersion ?? 0,
         (chunkX, chunkZ, meshes) => {
-          if (this.disposed || !this.material) {
+          if (
+            this.disposed ||
+            !this.material ||
+            this.chunkMeshApplyAbortController?.signal.aborted
+          ) {
             return;
           }
 
-          const chunk = this.chunkGrid[chunkZ]?.[chunkX];
-          if (!chunk) {
-            return;
-          }
-
-          meshes.forEach((meshData, index) => {
-            const lod = index as TerrainLODLevel;
-            const mesh = TerrainMeshBuilder.buildChunkMeshFromData(
-              this.scene,
-              chunk.data,
-              lod,
-              this.material!,
-              meshData
-            );
-            chunk.setMesh(lod, mesh);
-          });
+          this.enqueueChunkMeshBuild(chunkX, chunkZ, meshes);
         },
         (progress) => {
           if (this.disposed) {
@@ -573,6 +583,7 @@ export class TerrainSystem {
           this.buildOptions.onChunkBuildProgress?.(progress);
         }
       );
+      await this.chunkMeshApplyPromise;
     } catch (error) {
       console.error("Chunk worker build failed, falling back to main-thread mesh generation.", error);
       if (this.disposed) {
@@ -588,10 +599,70 @@ export class TerrainSystem {
       });
     }
   }
+
+  private enqueueChunkMeshBuild(
+    chunkX: number,
+    chunkZ: number,
+    meshes: readonly TerrainChunkMeshData[]
+  ): void {
+    const chunk = this.chunkGrid[chunkZ]?.[chunkX];
+    if (!chunk) {
+      return;
+    }
+
+    meshes.forEach((meshData, index) => {
+      this.pendingChunkMeshQueue.push({
+        chunk,
+        lod: index as TerrainLODLevel,
+        meshData
+      });
+    });
+
+    if (!this.chunkMeshApplyPromise) {
+      const abortSignal = this.chunkMeshApplyAbortController?.signal;
+      this.chunkMeshApplyPromise = runCoroutineAsync(
+        this.applyPendingChunkMeshesCoroutine(),
+        createYieldingScheduler(6),
+        abortSignal
+      ).finally(() => {
+        this.chunkMeshApplyPromise = null;
+      });
+    }
+  }
+
+  private *applyPendingChunkMeshesCoroutine() {
+    while (this.pendingChunkMeshQueue.length > 0) {
+      if (this.disposed || !this.material) {
+        return;
+      }
+
+      const pending = this.pendingChunkMeshQueue.shift();
+      if (!pending) {
+        return;
+      }
+
+      const mesh = TerrainMeshBuilder.buildChunkMeshFromData(
+        this.scene,
+        pending.chunk.data,
+        pending.lod,
+        this.material,
+        pending.meshData
+      );
+      pending.chunk.setMesh(pending.lod, mesh);
+      yield;
+    }
+  }
 }
 
 export interface TerrainSystemBuildOptions {
   readonly chunkBuildCoordinator?: TerrainChunkBuildCoordinator | null;
   readonly chunkBuildVersion?: number;
+  readonly initialCameraPosition?: Vector3 | null;
   readonly onChunkBuildProgress?: (progress: TerrainChunkBuildProgress) => void;
+}
+
+interface PendingChunkMeshBuild {
+  readonly chunk: TerrainChunk;
+  readonly lod: TerrainLODLevel;
+  readonly meshData: TerrainChunkMeshData;
 }

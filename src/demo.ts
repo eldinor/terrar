@@ -1,10 +1,13 @@
 import type {
   TerrainConfigOverrides,
   TerrainErosionConfig,
+  TerrainFeatureConfig,
   TerrainPoiConfig,
   TerrainRiverConfig,
   TerrainShapeConfig
 } from "./terrain/TerrainConfig";
+import type { TerrainPoiKind } from "./terrain/TerrainPoiPlanner";
+import type { TerrainPoiDebugConfig } from "./terrain/TerrainPoiSystem";
 import type { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
 import {
   TerrainDebugViewMode,
@@ -15,6 +18,11 @@ import { createTerrainDemo } from "./main";
 interface TerrainPreset {
   readonly name: string;
   readonly config: TerrainConfigOverrides;
+  readonly featureState?: PresetFeatureState;
+}
+
+interface PresetFeatureState {
+  readonly poiDebug: TerrainPoiDebugConfig;
 }
 
 const BUILTIN_PRESETS: readonly TerrainPreset[] = [
@@ -118,6 +126,26 @@ panel.style.backdropFilter = "blur(8px)";
 panel.style.boxSizing = "border-box";
 document.body.appendChild(panel);
 
+const featurePanel = document.createElement("div");
+featurePanel.style.position = "fixed";
+featurePanel.style.top = "72px";
+featurePanel.style.right = "16px";
+featurePanel.style.width = "280px";
+featurePanel.style.maxHeight = "calc(100vh - 88px)";
+featurePanel.style.overflowY = "auto";
+featurePanel.style.overflowX = "hidden";
+featurePanel.style.padding = "12px";
+featurePanel.style.border = "1px solid rgba(255, 255, 255, 0.18)";
+featurePanel.style.borderRadius = "12px";
+featurePanel.style.background = "rgba(6, 10, 15, 0.78)";
+featurePanel.style.color = "#f4edc9";
+featurePanel.style.font = "12px/1.45 Consolas, 'Courier New', monospace";
+featurePanel.style.zIndex = "10";
+featurePanel.style.userSelect = "none";
+featurePanel.style.backdropFilter = "blur(8px)";
+featurePanel.style.boxSizing = "border-box";
+document.body.appendChild(featurePanel);
+
 let wireframe = false;
 let debugVisible = false;
 let loadingDebug = false;
@@ -141,6 +169,7 @@ function renderHud(): void {
 
 renderHud();
 renderPanel();
+renderFeaturePanel();
 
 window.addEventListener("keydown", async (event) => {
   if (event.repeat) {
@@ -174,20 +203,48 @@ function renderPanel(): void {
 
   if (activeTab === "runtime") {
     renderRuntimeTab();
-    return;
-  }
-
-  if (activeTab === "material") {
+  } else if (activeTab === "material") {
     renderMaterialTab();
-    return;
-  }
-
-  if (activeTab === "world") {
+  } else if (activeTab === "world") {
     renderWorldTab();
-    return;
+  } else {
+    renderPresetsTab();
   }
 
-  renderPresetsTab();
+  renderFeaturePanel();
+}
+
+function renderFeaturePanel(): void {
+  featurePanel.replaceChildren();
+  featurePanel.appendChild(createHeading("World Features"));
+  featurePanel.appendChild(createSectionLabel("Build"));
+  featurePanel.appendChild(
+    createCheckbox("POI", draftConfig.features.poi, (checked) => {
+      draftConfig.features.poi = checked;
+      if (!checked) {
+        draftConfig.features.roads = false;
+      }
+      renderFeaturePanel();
+    })
+  );
+  featurePanel.appendChild(
+    createCheckbox("Build Roads", draftConfig.features.roads, (checked) => {
+      draftConfig.features.roads = checked && draftConfig.features.poi;
+    }, !draftConfig.features.poi)
+  );
+  featurePanel.appendChild(createFeatureBuildStatus());
+  featurePanel.appendChild(
+    createButton("Apply Features", () => {
+      applyDraftToWorld();
+    })
+  );
+
+  if (draftConfig.features.poi) {
+    featurePanel.appendChild(createDivider());
+    featurePanel.appendChild(createSectionLabel("POI Debug"));
+    featurePanel.appendChild(createPoiDebugControls());
+    featurePanel.appendChild(createPoiStatsRow());
+  }
 }
 
 function renderRuntimeTab(): void {
@@ -285,21 +342,6 @@ function renderRuntimeTab(): void {
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Camera Radius"));
-  panel.appendChild(
-    createCheckbox("Show POI", draftConfig.showPoi, (checked) => {
-      draftConfig.showPoi = checked;
-      demo.setShowPoi(checked);
-      renderHud();
-    })
-  );
-  panel.appendChild(createPoiStatsRow());
-  panel.appendChild(
-    createCheckbox("Show Roads", draftConfig.showRoads, (checked) => {
-      draftConfig.showRoads = checked;
-      demo.setShowRoads(checked);
-      renderHud();
-    })
-  );
   panel.appendChild(
     createCheckbox("Show Foliage", draftConfig.showFoliage, (checked) => {
       draftConfig.showFoliage = checked;
@@ -763,6 +805,9 @@ function createPresetControls(): HTMLElement {
   const apply = createButton("Apply Preset", () => {
     const preset = presetOptions[Number(select.value)];
     draftConfig = mergeDraftWithOverrides(buildDraftConfig(), preset.config);
+    if (preset.featureState) {
+      draftConfig.poiDebug = clonePoiDebugConfig(preset.featureState.poiDebug);
+    }
     applyDraftToWorld();
   });
 
@@ -775,11 +820,15 @@ function createPresetControls(): HTMLElement {
     const customPresets = getSavedPresets();
     customPresets.push({
       name,
-      config: buildTerrainOverridesFromDraft()
+      config: buildTerrainOverridesFromDraft(),
+      featureState: {
+        poiDebug: clonePoiDebugConfig(draftConfig.poiDebug)
+      }
     });
     savePresets(customPresets);
     presetOptions = getPresetOptions();
     renderPanel();
+    renderFeaturePanel();
   });
 
   buttons.appendChild(apply);
@@ -850,7 +899,8 @@ function createDebugModeControl(): HTMLElement {
 function createCheckbox(
   label: string,
   initialValue: boolean,
-  onChange: (checked: boolean) => void
+  onChange: (checked: boolean) => void,
+  disabled = false
 ): HTMLElement {
   const row = document.createElement("label");
   row.style.display = "flex";
@@ -864,12 +914,15 @@ function createCheckbox(
   const input = document.createElement("input");
   input.type = "checkbox";
   input.checked = initialValue;
+  input.disabled = disabled;
   input.style.flex = "0 0 auto";
   input.addEventListener("change", () => onChange(input.checked));
 
   const title = document.createElement("span");
   title.textContent = label;
   title.style.minWidth = "0";
+  title.style.opacity = disabled ? "0.55" : "1";
+  row.style.opacity = disabled ? "0.7" : "1";
 
   row.appendChild(input);
   row.appendChild(title);
@@ -912,6 +965,75 @@ function createPoiStatsRow(): HTMLElement {
     `POI ${stats.total}: V ${stats.villages} | H ${stats.harbors} | ` +
     `F ${stats.hillforts} | M ${stats.mines}`;
   return row;
+}
+
+function createFeatureBuildStatus(): HTMLElement {
+  const row = document.createElement("div");
+  row.style.marginTop = "8px";
+  row.style.padding = "6px 8px";
+  row.style.borderRadius = "8px";
+  row.style.background = "rgba(14, 21, 29, 0.95)";
+  row.style.border = "1px solid rgba(255,255,255,0.1)";
+  row.style.color = "#9cb3c3";
+  row.style.whiteSpace = "pre-wrap";
+  row.textContent = draftConfig.features.poi
+    ? draftConfig.features.roads
+      ? "POI and roads will rebuild into the world."
+      : "POI will load on rebuild. Roads remain disabled."
+    : "POI and roads are excluded by default.";
+  return row;
+}
+
+function createPoiDebugControls(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.display = "grid";
+  wrap.style.gap = "6px";
+  wrap.style.marginTop = "8px";
+  wrap.style.padding = "8px";
+  wrap.style.borderRadius = "8px";
+  wrap.style.background = "rgba(14, 21, 29, 0.95)";
+  wrap.style.border = "1px solid rgba(255,255,255,0.1)";
+
+  const title = document.createElement("div");
+  title.textContent = "POI Debug";
+  title.style.color = "#9cb3c3";
+  wrap.appendChild(title);
+
+  wrap.appendChild(
+    createCheckbox("Show Scores", draftConfig.poiDebug.showScores, (checked) => {
+      draftConfig.poiDebug.showScores = checked;
+      demo.setPoiDebugConfig(draftConfig.poiDebug);
+    })
+  );
+  wrap.appendChild(
+    createCheckbox("Show Radii", draftConfig.poiDebug.showRadii, (checked) => {
+      draftConfig.poiDebug.showRadii = checked;
+      demo.setPoiDebugConfig(draftConfig.poiDebug);
+    })
+  );
+  wrap.appendChild(
+    createCheckbox("Show Tags", draftConfig.poiDebug.showTags, (checked) => {
+      draftConfig.poiDebug.showTags = checked;
+      demo.setPoiDebugConfig(draftConfig.poiDebug);
+    })
+  );
+
+  ([
+    ["Villages", "village"],
+    ["Harbors", "harbor"],
+    ["Hillforts", "hillfort"],
+    ["Mines", "mine"]
+  ] as const).forEach(([label, kind]) => {
+    wrap.appendChild(
+      createCheckbox(label, draftConfig.poiDebug.kinds[kind], (checked) => {
+        draftConfig.poiDebug.kinds[kind] = checked;
+        demo.setPoiDebugConfig(draftConfig.poiDebug);
+        renderHud();
+      })
+    );
+  });
+
+  return wrap;
 }
 
 function createWaterDebugControl(): HTMLElement {
@@ -966,8 +1088,9 @@ function applyDraftToWorld(): void {
   demo.setCollisionRadius(draftConfig.collisionRadius);
   demo.setFoliageRadius(draftConfig.foliageRadius);
   demo.setShowFoliage(draftConfig.showFoliage);
-  demo.setShowPoi(draftConfig.showPoi);
-  demo.setShowRoads(draftConfig.showRoads);
+  demo.setShowPoi(draftConfig.features.poi);
+  demo.setPoiDebugConfig(draftConfig.poiDebug);
+  demo.setShowRoads(draftConfig.features.roads);
   demo.setLodDistances(draftConfig.lodDistances);
   demo.setWaterLevel(draftConfig.waterLevel);
   demo.setWaterConfig(draftConfig.water);
@@ -976,6 +1099,7 @@ function applyDraftToWorld(): void {
   renderHud();
   draftConfig = buildDraftConfig();
   renderPanel();
+  renderFeaturePanel();
 }
 
 function applyDraftMaterialConfig(): void {
@@ -1018,8 +1142,9 @@ function buildDraftConfig(): DraftConfig {
     collisionRadius: demo.getCollisionRadius(),
     foliageRadius: demo.getFoliageRadius(),
     showFoliage: demo.getShowFoliage(),
-    showPoi: demo.getShowPoi(),
-    showRoads: demo.getShowRoads(),
+    showPoi: demo.getTerrainConfig().features.poi,
+    poiDebug: demo.getPoiDebugConfig(),
+    showRoads: demo.getTerrainConfig().features.roads,
     lodDistances: [...demo.getLodDistances()] as [number, number, number],
     materialThresholds: { ...demo.getTerrainMaterialThresholds() },
     materialScales: { ...demo.getTerrainMaterialConfig().scales },
@@ -1034,6 +1159,7 @@ function buildDraftConfig(): DraftConfig {
     smallRiverTintSaturation:
       demo.getTerrainMaterialConfig().smallRiverTintSaturation,
     erosion: { ...config.erosion },
+    features: { ...config.features },
     poi: { ...config.poi },
     rivers: { ...config.rivers },
     shape: { ...config.shape }
@@ -1050,6 +1176,7 @@ function buildTerrainOverridesFromDraft(): TerrainConfigOverrides {
     foliageRadius: draftConfig.foliageRadius,
     lodDistances: draftConfig.lodDistances,
     erosion: { ...draftConfig.erosion },
+    features: { ...draftConfig.features },
     poi: { ...draftConfig.poi },
     rivers: { ...draftConfig.rivers },
     shape: { ...draftConfig.shape }
@@ -1070,8 +1197,14 @@ function mergeDraftWithOverrides(
     collisionRadius: overrides.collisionRadius ?? base.collisionRadius,
     foliageRadius: overrides.foliageRadius ?? base.foliageRadius,
     showFoliage: base.showFoliage,
-    showPoi: base.showPoi,
-    showRoads: base.showRoads,
+    showPoi: overrides.features?.poi ?? base.showPoi,
+    poiDebug: {
+      showScores: base.poiDebug.showScores,
+      showRadii: base.poiDebug.showRadii,
+      showTags: base.poiDebug.showTags,
+      kinds: { ...base.poiDebug.kinds }
+    },
+    showRoads: overrides.features?.roads ?? base.showRoads,
     lodDistances: (overrides.lodDistances
       ? [...overrides.lodDistances]
       : [...base.lodDistances]) as [number, number, number],
@@ -1089,6 +1222,10 @@ function mergeDraftWithOverrides(
       ...base.erosion,
       ...overrides.erosion
     },
+    features: {
+      ...base.features,
+      ...overrides.features
+    },
     poi: {
       ...base.poi,
       ...overrides.poi
@@ -1101,6 +1238,17 @@ function mergeDraftWithOverrides(
       ...base.shape,
       ...overrides.shape
     }
+  };
+}
+
+function clonePoiDebugConfig(
+  config: MutableTerrainPoiDebugConfig | TerrainPoiDebugConfig
+): MutableTerrainPoiDebugConfig {
+  return {
+    showScores: config.showScores,
+    showRadii: config.showRadii,
+    showTags: config.showTags,
+    kinds: { ...config.kinds }
   };
 }
 
@@ -1299,7 +1447,9 @@ interface DraftConfig {
   foliageRadius: number;
   showFoliage: boolean;
   showPoi: boolean;
+  poiDebug: MutableTerrainPoiDebugConfig;
   showRoads: boolean;
+  features: MutableTerrainFeatureConfig;
   lodDistances: [number, number, number];
   materialThresholds: TerrainLayerThresholds;
   materialScales: {
@@ -1335,6 +1485,17 @@ type MutableTerrainErosionConfig = {
 
 type MutableTerrainPoiConfig = {
   -readonly [Key in keyof TerrainPoiConfig]: TerrainPoiConfig[Key];
+};
+
+type MutableTerrainFeatureConfig = {
+  -readonly [Key in keyof TerrainFeatureConfig]: TerrainFeatureConfig[Key];
+};
+
+type MutableTerrainPoiDebugConfig = {
+  showScores: boolean;
+  showRadii: boolean;
+  showTags: boolean;
+  kinds: Record<TerrainPoiKind, boolean>;
 };
 
 type MutableTerrainRiverConfig = {

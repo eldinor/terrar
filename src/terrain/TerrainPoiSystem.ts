@@ -14,12 +14,34 @@ export interface TerrainPoiStats {
   readonly mines: number;
 }
 
+export interface TerrainPoiDebugConfig {
+  readonly showScores: boolean;
+  readonly showRadii: boolean;
+  readonly showTags: boolean;
+  readonly kinds: Readonly<Record<TerrainPoiKind, boolean>>;
+}
+
+export const DEFAULT_TERRAIN_POI_DEBUG_CONFIG: TerrainPoiDebugConfig = Object.freeze({
+  showScores: false,
+  showRadii: false,
+  showTags: true,
+  kinds: Object.freeze({
+    [TerrainPoiKind.Village]: true,
+    [TerrainPoiKind.Harbor]: true,
+    [TerrainPoiKind.Hillfort]: true,
+    [TerrainPoiKind.Mine]: true
+  })
+});
+
 export class TerrainPoiSystem {
   private readonly meshes: Mesh[] = [];
   private readonly labels: HTMLDivElement[] = [];
   private readonly root: HTMLDivElement;
   private sites: TerrainPoi[] = [];
   private visible = true;
+  private debugConfig: TerrainPoiDebugConfig = clonePoiDebugConfig(
+    DEFAULT_TERRAIN_POI_DEBUG_CONFIG
+  );
 
   constructor(
     private readonly scene: Scene,
@@ -38,6 +60,7 @@ export class TerrainPoiSystem {
       this.meshes.push(this.createMarker(site));
       this.labels.push(this.createLabel(site));
     });
+    this.applyDebugConfig();
   }
 
   update(): void {
@@ -64,7 +87,9 @@ export class TerrainPoiSystem {
       );
       const inFrontOfCamera = projected.z >= 0 && projected.z <= 1;
       const label = this.labels[index];
-      label.style.display = this.visible && inFrontOfCamera ? "block" : "none";
+      const siteVisible =
+        this.visible && this.debugConfig.kinds[site.kind] && inFrontOfCamera;
+      label.style.display = siteVisible ? "block" : "none";
       label.style.transform = `translate(${projected.x}px, ${projected.y}px) translate(-50%, -100%)`;
     });
   }
@@ -113,14 +138,20 @@ export class TerrainPoiSystem {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
-    this.meshes.forEach((mesh) => mesh.setEnabled(visible));
-    this.labels.forEach((label) => {
-      label.style.display = visible ? "block" : "none";
-    });
+    this.applyDebugConfig();
   }
 
   isVisible(): boolean {
     return this.visible;
+  }
+
+  setDebugConfig(config: TerrainPoiDebugConfig): void {
+    this.debugConfig = clonePoiDebugConfig(config);
+    this.applyDebugConfig();
+  }
+
+  getDebugConfig(): TerrainPoiDebugConfig {
+    return clonePoiDebugConfig(this.debugConfig);
   }
 
   private createMarker(site: TerrainPoi): Mesh {
@@ -145,8 +176,7 @@ export class TerrainPoiSystem {
     label.style.borderRadius = "6px";
     label.style.background = "rgba(8, 13, 19, 0.6)";
     label.style.border = "1px solid rgba(243, 240, 212, 0.16)";
-    label.textContent =
-      `${getPoiLabel(site.kind)}\n${site.tags.slice(0, 2).join(" | ") || "site"}`;
+    label.textContent = buildPoiLabel(site, this.debugConfig);
     this.root.appendChild(label);
     return label;
   }
@@ -160,6 +190,20 @@ export class TerrainPoiSystem {
     root.style.zIndex = "8";
     document.body.appendChild(root);
     return root;
+  }
+
+  private applyDebugConfig(): void {
+    this.sites.forEach((site, index) => {
+      const enabled = this.visible && this.debugConfig.kinds[site.kind];
+      this.meshes[index]?.setEnabled(enabled);
+      const label = this.labels[index];
+      if (label) {
+        label.textContent = buildPoiLabel(site, this.debugConfig);
+        if (!enabled) {
+          label.style.display = "none";
+        }
+      }
+    });
   }
 }
 
@@ -230,4 +274,32 @@ function getPoiLabel(kind: TerrainPoiKind): string {
     case TerrainPoiKind.Mine:
       return "Mine";
   }
+}
+
+function buildPoiLabel(
+  site: TerrainPoi,
+  config: TerrainPoiDebugConfig
+): string {
+  const lines = [getPoiLabel(site.kind)];
+  if (config.showScores) {
+    lines.push(`score ${site.score.toFixed(2)}`);
+  }
+  if (config.showRadii) {
+    lines.push(`r ${Math.round(site.radius)}`);
+  }
+  if (config.showTags) {
+    lines.push(site.tags.slice(0, 3).join(" | ") || "site");
+  }
+  return lines.join("\n");
+}
+
+function clonePoiDebugConfig(
+  config: TerrainPoiDebugConfig
+): TerrainPoiDebugConfig {
+  return {
+    showScores: config.showScores,
+    showRadii: config.showRadii,
+    showTags: config.showTags,
+    kinds: { ...config.kinds }
+  };
 }

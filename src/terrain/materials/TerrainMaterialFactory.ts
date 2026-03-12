@@ -106,7 +106,7 @@ export class TerrainMaterialFactory {
     material.setFloat("riverMeshMinWidth", 5);
     material.setVector2("roadMaskWorldMin", new Vector2(-512, -512));
     material.setVector2("roadMaskWorldSize", new Vector2(1024, 1024));
-    material.setFloat("roadTintStrength", 0.5);
+    material.setFloat("roadTintStrength", 0.95);
     material.setTexture("roadMask", createBlackMaskTexture(scene));
 
     this.applyConfig(material, config);
@@ -609,9 +609,9 @@ function ensureTerrainBlendShadersRegistered(): void {
       dirt += flow * 0.08 * (1.0 - sand);
       dirt += wetRiver * 0.18 + openLake * 0.16;
       dirt += floodplain * 0.24;
-      grass *= 1.0 - roadMaskValue * 0.82;
-      dirt += roadMaskValue * 0.28;
-      sand += roadMaskValue * 0.06;
+      grass *= 1.0 - roadMaskValue * 0.9;
+      dirt += roadMaskValue * 0.34;
+      sand += roadMaskValue * 0.04;
       grass *= 1.0 - (wetRiver * 0.62 + openLake * 0.82);
       sand *= 1.0 - (wetRiver * 0.38 + openLake * 0.22);
       sand += floodplain * mix(0.08, 0.4, sedimentSandBias) * (0.72 + shoreHeight * 0.55);
@@ -642,7 +642,7 @@ function ensureTerrainBlendShadersRegistered(): void {
         (1.0 - openLake) *
         (1.0 - smoothstep(0.4, 0.92, snow)) *
         (1.0 - smoothstep(0.45, 0.95, rock));
-      vec3 roadColor = mix(vec3(0.34, 0.27, 0.16), vec3(0.5, 0.4, 0.24), macroMask);
+      vec3 roadColor = mix(vec3(0.36, 0.36, 0.37), vec3(0.54, 0.54, 0.56), macroMask);
       finalCol.rgb = mix(finalCol.rgb, roadColor, roadBlend);
       finalCol.rgb = mix(
         finalCol.rgb,

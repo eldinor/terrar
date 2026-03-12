@@ -16,7 +16,12 @@ import { TerrainFoliageStats, TerrainFoliageSystem } from "./TerrainFoliageSyste
 import { TerrainLODController } from "./TerrainLODController";
 import { TerrainMeshBuilder } from "./TerrainMeshBuilder";
 import { TerrainPoi, TerrainPoiPlanner } from "./TerrainPoiPlanner";
-import { TerrainPoiStats, TerrainPoiSystem } from "./TerrainPoiSystem";
+import {
+  DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
+  TerrainPoiDebugConfig,
+  TerrainPoiStats,
+  TerrainPoiSystem
+} from "./TerrainPoiSystem";
 import { TerrainRoad, TerrainRoadPlanner } from "./TerrainRoadPlanner";
 import { TerrainRoadStats, TerrainRoadSystem } from "./TerrainRoadSystem";
 import { TerrainWaterConfig, TerrainWaterSystem } from "./TerrainWaterSystem";
@@ -35,10 +40,10 @@ export class TerrainSystem {
   private generator: ProceduralGenerator;
   private foliagePlanner: TerrainFoliagePlanner;
   private foliageSystem: TerrainFoliageSystem;
-  private poiPlanner: TerrainPoiPlanner;
-  private poiSystem: TerrainPoiSystem;
-  private roadPlanner: TerrainRoadPlanner;
-  private roadSystem: TerrainRoadSystem;
+  private poiPlanner: TerrainPoiPlanner | null;
+  private poiSystem: TerrainPoiSystem | null;
+  private roadPlanner: TerrainRoadPlanner | null;
+  private roadSystem: TerrainRoadSystem | null;
   private waterSystem: TerrainWaterSystem;
   private lodController: TerrainLODController;
   private readonly chunks: TerrainChunk[] = [];
@@ -50,8 +55,12 @@ export class TerrainSystem {
   private collisionRadius: number;
   private foliageRadius: number;
   private foliageVisible = false;
-  private poiVisible = true;
-  private roadVisible = true;
+  private poiVisible = false;
+  private roadVisible = false;
+  private poiDebugConfig: TerrainPoiDebugConfig = {
+    ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
+    kinds: { ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG.kinds }
+  };
   private debugViewMode = TerrainDebugViewMode.Final;
   private materialConfig: TerrainMaterialConfig | null = null;
   private readonly textureOptions: Required<TerrainTextureOptions>;
@@ -79,14 +88,19 @@ export class TerrainSystem {
       this.foliagePlanner,
       this.config
     );
-    this.poiPlanner = new TerrainPoiPlanner(this.config, this.generator);
-    this.poiSystem = new TerrainPoiSystem(this.scene, this.poiPlanner);
-    this.roadPlanner = new TerrainRoadPlanner(this.config, this.generator);
-    this.roadSystem = new TerrainRoadSystem(
-      this.scene,
-      this.roadPlanner,
-      this.config
-    );
+    this.poiPlanner = this.config.features.poi
+      ? new TerrainPoiPlanner(this.config, this.generator)
+      : null;
+    this.poiSystem = this.poiPlanner
+      ? new TerrainPoiSystem(this.scene, this.poiPlanner)
+      : null;
+    this.roadPlanner =
+      this.config.features.poi && this.config.features.roads
+        ? new TerrainRoadPlanner(this.config, this.generator)
+        : null;
+    this.roadSystem = this.roadPlanner
+      ? new TerrainRoadSystem(this.scene, this.roadPlanner, this.config)
+      : null;
     this.waterSystem = new TerrainWaterSystem(
       this.scene,
       this.config,
@@ -117,6 +131,27 @@ export class TerrainSystem {
       meshMinWidth: this.waterSystem.getConfig().riverMeshMinWidth
     });
 
+    let roads: readonly TerrainRoad[] = [];
+    if (this.poiSystem) {
+      this.poiSystem.initialize();
+      this.poiSystem.setDebugConfig(this.poiDebugConfig);
+      this.poiVisible = true;
+    }
+    if (this.poiSystem && this.roadSystem) {
+      this.roadSystem.initialize(this.poiSystem.getSites());
+      this.roadVisible = true;
+      roads = this.roadSystem.getRoads();
+      TerrainMaterialFactory.setRoadMask(
+        this.material,
+        this.roadSystem.getRoadMaskTexture()
+      );
+      TerrainMaterialFactory.setRoadMaskBounds(
+        this.material,
+        { x: this.config.worldMin, z: this.config.worldMin },
+        { x: this.config.worldSize, z: this.config.worldSize }
+      );
+    }
+
     for (let chunkZ = 0; chunkZ < this.config.chunksPerAxis; chunkZ += 1) {
       const row: TerrainChunk[] = [];
 
@@ -125,7 +160,8 @@ export class TerrainSystem {
           chunkX,
           chunkZ,
           this.config,
-          this.generator
+          this.generator,
+          roads
         );
         const chunk = new TerrainChunk(
           this.scene,
@@ -143,17 +179,6 @@ export class TerrainSystem {
 
     this.initialized = true;
     this.foliageSystem.initialize(this.chunks);
-    this.poiSystem.initialize();
-    this.roadSystem.initialize(this.poiSystem.getSites());
-    TerrainMaterialFactory.setRoadMask(
-      this.material,
-      this.roadSystem.getRoadMaskTexture()
-    );
-    TerrainMaterialFactory.setRoadMaskBounds(
-      this.material,
-      { x: this.config.worldMin, z: this.config.worldMin },
-      { x: this.config.worldSize, z: this.config.worldSize }
-    );
     this.waterSystem.initialize();
   }
 
@@ -193,9 +218,9 @@ export class TerrainSystem {
       cameraPosition,
       this.foliageVisible ? this.foliageRadius : 0
     );
-    this.poiSystem.setVisible(this.poiVisible);
-    this.roadSystem.setVisible(this.roadVisible);
-    this.poiSystem.update();
+    this.poiSystem?.setVisible(this.poiVisible);
+    this.roadSystem?.setVisible(this.roadVisible);
+    this.poiSystem?.update();
     this.waterSystem.update(this.elapsedTimeSeconds, cameraPosition);
   }
 
@@ -204,8 +229,8 @@ export class TerrainSystem {
     this.debugOverlay = null;
     this.debugOverlayPromise = null;
     this.foliageSystem.dispose();
-    this.poiSystem.dispose();
-    this.roadSystem.dispose();
+    this.poiSystem?.dispose();
+    this.roadSystem?.dispose();
     this.waterSystem.dispose();
     this.chunks.forEach((chunk) => chunk.dispose());
     this.chunks.length = 0;
@@ -350,24 +375,50 @@ export class TerrainSystem {
   }
 
   getPoiSites(): readonly TerrainPoi[] {
-    return this.poiSystem.getSites();
+    return this.poiSystem?.getSites() ?? [];
   }
 
   getPoiStats(): TerrainPoiStats {
-    return this.poiSystem.getStats();
+    return (
+      this.poiSystem?.getStats() ?? {
+        total: 0,
+        villages: 0,
+        harbors: 0,
+        hillforts: 0,
+        mines: 0
+      }
+    );
+  }
+
+  setPoiDebugConfig(config: TerrainPoiDebugConfig): void {
+    this.poiDebugConfig = {
+      ...config,
+      kinds: { ...config.kinds }
+    };
+    this.poiSystem?.setDebugConfig(this.poiDebugConfig);
+  }
+
+  getPoiDebugConfig(): TerrainPoiDebugConfig {
+    return {
+      ...this.poiDebugConfig,
+      kinds: { ...this.poiDebugConfig.kinds }
+    };
   }
 
   getRoads(): readonly TerrainRoad[] {
-    return this.roadSystem.getRoads();
+    return this.roadSystem?.getRoads() ?? [];
   }
 
   getRoadStats(): TerrainRoadStats {
-    return this.roadSystem.getStats();
+    return this.roadSystem?.getStats() ?? {
+      totalRoads: 0,
+      totalPoints: 0
+    };
   }
 
   setShowPoi(enabled: boolean): void {
-    this.poiVisible = enabled;
-    this.poiSystem.setVisible(enabled);
+    this.poiVisible = enabled && this.config.features.poi;
+    this.poiSystem?.setVisible(this.poiVisible);
   }
 
   getShowPoi(): boolean {
@@ -375,8 +426,8 @@ export class TerrainSystem {
   }
 
   setShowRoads(enabled: boolean): void {
-    this.roadVisible = enabled;
-    this.roadSystem.setVisible(enabled);
+    this.roadVisible = enabled && this.config.features.roads;
+    this.roadSystem?.setVisible(this.roadVisible);
   }
 
   getShowRoads(): boolean {

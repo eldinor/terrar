@@ -8,7 +8,7 @@ import { TerrainPoi } from "./terrain/TerrainPoiPlanner";
 import { TerrainRoad } from "./terrain/TerrainRoadPlanner";
 import { TerrainSystem } from "./terrain/TerrainSystem";
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
-import { TerrainPoiStats } from "./terrain/TerrainPoiSystem";
+import { TerrainPoiDebugConfig, TerrainPoiStats } from "./terrain/TerrainPoiSystem";
 import { TerrainRoadStats } from "./terrain/TerrainRoadSystem";
 import {
   TerrainDebugViewMode,
@@ -54,6 +54,8 @@ export interface TerrainDemo {
   readonly getFoliageStats: () => TerrainFoliageStats;
   readonly getPoiSites: () => readonly TerrainPoi[];
   readonly getPoiStats: () => TerrainPoiStats;
+  readonly setPoiDebugConfig: (config: TerrainPoiDebugConfig) => void;
+  readonly getPoiDebugConfig: () => TerrainPoiDebugConfig;
   readonly getRoads: () => readonly TerrainRoad[];
   readonly getRoadStats: () => TerrainRoadStats;
 }
@@ -146,6 +148,7 @@ export function createTerrainDemo(
       const foliageRadius = terrainSystem.getFoliageRadius();
       const showFoliage = terrainSystem.getShowFoliage();
       const showPoi = terrainSystem.getShowPoi();
+      const poiDebugConfig = terrainSystem.getPoiDebugConfig();
       const showRoads = terrainSystem.getShowRoads();
       const lodDistances = terrainSystem.getLodDistances();
       const config = terrainSystem.getConfig();
@@ -157,6 +160,7 @@ export function createTerrainDemo(
       terrainSystem.setFoliageRadius(foliageRadius);
       terrainSystem.setShowFoliage(showFoliage);
       terrainSystem.setShowPoi(showPoi);
+      terrainSystem.setPoiDebugConfig(poiDebugConfig);
       terrainSystem.setShowRoads(showRoads);
       terrainSystem.setLodDistances(lodDistances);
       terrainSystem.setWaterLevel(waterLevel);
@@ -176,6 +180,7 @@ export function createTerrainDemo(
       const foliageRadius = terrainSystem.getFoliageRadius();
       const showFoliage = terrainSystem.getShowFoliage();
       const showPoi = terrainSystem.getShowPoi();
+      const poiDebugConfig = terrainSystem.getPoiDebugConfig();
       const showRoads = terrainSystem.getShowRoads();
       const lodDistances = terrainSystem.getLodDistances();
       const currentTextureOptions = terrainSystem.getTextureOptions();
@@ -186,6 +191,10 @@ export function createTerrainDemo(
         erosion: {
           ...config.erosion,
           ...nextOverrides.erosion
+        },
+        features: {
+          ...config.features,
+          ...nextOverrides.features
         },
         poi: {
           ...config.poi,
@@ -212,6 +221,7 @@ export function createTerrainDemo(
       );
       terrainSystem.setShowFoliage(showFoliage);
       terrainSystem.setShowPoi(showPoi);
+      terrainSystem.setPoiDebugConfig(poiDebugConfig);
       terrainSystem.setShowRoads(showRoads);
       terrainSystem.setLodDistances(nextOverrides.lodDistances ?? lodDistances);
       terrainSystem.setWaterLevel(nextOverrides.waterLevel ?? waterLevel);
@@ -224,6 +234,9 @@ export function createTerrainDemo(
     getFoliageStats: () => terrainSystem.getFoliageStats(),
     getPoiSites: () => terrainSystem.getPoiSites(),
     getPoiStats: () => terrainSystem.getPoiStats(),
+    setPoiDebugConfig: (config: TerrainPoiDebugConfig) =>
+      terrainSystem.setPoiDebugConfig(config),
+    getPoiDebugConfig: () => terrainSystem.getPoiDebugConfig(),
     getRoads: () => terrainSystem.getRoads(),
     getRoadStats: () => terrainSystem.getRoadStats()
   };

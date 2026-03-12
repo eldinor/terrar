@@ -39,6 +39,9 @@ interface TerrainPoiContext {
   readonly localFlatness: number;
   readonly lowland: number;
   readonly highland: number;
+  readonly floodplainCore: number;
+  readonly crossingCandidate: number;
+  readonly passCandidate: number;
 }
 
 interface TerrainPoiArchetype {
@@ -167,16 +170,25 @@ export class TerrainPoiPlanner {
       (1 - smoothStep(0.18, 0.8, context.lake));
     const fertile = context.sediment * 0.7 + context.moisture * 0.3;
     const moderateHeight = 1 - smoothStep(70, 170, context.height);
+    const safeFloodplain = 1 - context.floodplainCore;
     const value =
-      buildable * 0.38 +
-      context.waterNearby * 0.28 +
-      fertile * 0.2 +
-      moderateHeight * 0.14;
+      buildable * 0.32 +
+      context.waterNearby * 0.21 +
+      fertile * 0.18 +
+      moderateHeight * 0.1 +
+      safeFloodplain * 0.12 +
+      context.crossingCandidate * 0.07;
     return {
       kind: TerrainPoiKind.Village,
       value,
       radius: 122,
-      tags: buildTags("water", context.waterNearby, "fertile", fertile, "flat", context.localFlatness)
+      tags: buildContextTags(context, [
+        ["water", context.waterNearby],
+        ["fertile", fertile],
+        ["flat", context.localFlatness],
+        ["ford", context.crossingCandidate],
+        ["flood-risk", context.floodplainCore]
+      ])
     };
   }
 
@@ -185,34 +197,43 @@ export class TerrainPoiPlanner {
     const lowSlope = context.localFlatness;
     const lowland = context.lowland;
     const waterAccess = Math.max(context.waterNearby, context.lake);
-    const value = shore * 0.42 + lowSlope * 0.24 + lowland * 0.18 + waterAccess * 0.16;
+    const value =
+      shore * 0.42 +
+      lowSlope * 0.2 +
+      lowland * 0.16 +
+      waterAccess * 0.12 +
+      context.crossingCandidate * 0.1;
     return {
       kind: TerrainPoiKind.Harbor,
       value,
       radius: 146,
-      tags: buildTags("shore", shore, "water", waterAccess, "lowland", lowland)
+      tags: buildContextTags(context, [
+        ["shore", shore],
+        ["water", waterAccess],
+        ["lowland", lowland],
+        ["ford", context.crossingCandidate]
+      ])
     };
   }
 
   private scoreHillfort(context: TerrainPoiContext) {
     const commandingSlope = smoothStep(0.06, 0.22, context.slope);
     const value =
-      context.prominence * 0.38 +
-      context.highland * 0.24 +
-      commandingSlope * 0.22 +
-      (1 - context.waterNearby) * 0.16;
+      context.prominence * 0.28 +
+      context.highland * 0.2 +
+      commandingSlope * 0.18 +
+      (1 - context.waterNearby) * 0.12 +
+      context.passCandidate * 0.22;
     return {
       kind: TerrainPoiKind.Hillfort,
       value,
       radius: 154,
-      tags: buildTags(
-        "prominent",
-        context.prominence,
-        "high",
-        context.highland,
-        "defensive",
-        commandingSlope
-      )
+      tags: buildContextTags(context, [
+        ["prominent", context.prominence],
+        ["high", context.highland],
+        ["defensive", commandingSlope],
+        ["pass", context.passCandidate]
+      ])
     };
   }
 
@@ -226,7 +247,12 @@ export class TerrainPoiPlanner {
       kind: TerrainPoiKind.Mine,
       value,
       radius: 128,
-      tags: buildTags("rock", rocky, "dry", dry, "high", context.highland)
+      tags: buildContextTags(context, [
+        ["rock", rocky],
+        ["dry", dry],
+        ["high", context.highland],
+        ["pass", context.passCandidate]
+      ])
     };
   }
 
@@ -270,6 +296,15 @@ export class TerrainPoiPlanner {
     avgSediment /= samples;
     avgFlow /= samples;
     const prominence = Scalar.Clamp((center.height - avgHeight + 10) / 55, 0, 1);
+    const floodplainCore = Scalar.Clamp(
+      smoothStep(0.14, 0.42, center.flow) *
+        smoothStep(0.06, 0.32, center.river) *
+        (1 - localSlopeToFlatness(slope)) *
+        smoothStep(0.12, 0.48, avgSediment) *
+        (1 - smoothStep(this.config.waterLevel + 18, 120, center.height)),
+      0,
+      1
+    );
     const waterNearby = Scalar.Clamp(
       maxWater * 0.75 + Math.max(center.flow - 0.18, 0) * 0.4 + avgFlow * 0.2,
       0,
@@ -279,6 +314,8 @@ export class TerrainPoiPlanner {
     const localFlatness = 1 - smoothStep(0.05, 0.24, slope);
     const lowland = 1 - smoothStep(this.config.waterLevel + 24, 112, center.height);
     const highland = smoothStep(76, 180, center.height);
+    const crossingCandidate = this.computeCrossingCandidate(x, z, center, slope);
+    const passCandidate = this.computePassCandidate(x, z, center.height, slope);
 
     return {
       x,
@@ -296,7 +333,10 @@ export class TerrainPoiPlanner {
       coastProximity,
       localFlatness,
       lowland,
-      highland
+      highland,
+      floodplainCore,
+      crossingCandidate,
+      passCandidate
     };
   }
 
@@ -323,6 +363,54 @@ export class TerrainPoiPlanner {
     }
     return true;
   }
+
+  private computeCrossingCandidate(
+    x: number,
+    z: number,
+    center: ReturnType<ProceduralGenerator["sample"]>,
+    slope: number
+  ): number {
+    const riverBand = smoothStep(0.05, 0.22, center.river) * (1 - smoothStep(0.35, 0.7, center.river));
+    const flatBanks = 1 - smoothStep(0.06, 0.22, slope);
+    const notLake = 1 - smoothStep(0.05, 0.2, center.lake);
+    const widthHint = this.estimateLocalRiverWidth(x, z);
+    const narrowEnough = 1 - smoothStep(18, 42, widthHint);
+    return Scalar.Clamp(riverBand * flatBanks * notLake * narrowEnough, 0, 1);
+  }
+
+  private computePassCandidate(x: number, z: number, height: number, slope: number): number {
+    const span = 28;
+    const east = this.generator.sample(x + span, z).height;
+    const west = this.generator.sample(x - span, z).height;
+    const north = this.generator.sample(x, z + span).height;
+    const south = this.generator.sample(x, z - span).height;
+    const eastWestRelief = Math.min(east, west) - height;
+    const northSouthRelief = Math.min(north, south) - height;
+    const saddleRelief = Math.max(eastWestRelief, northSouthRelief);
+    const highland = smoothStep(82, 190, height);
+    const moderateSlope = 1 - smoothStep(0.2, 0.46, slope);
+    return Scalar.Clamp(
+      smoothStep(6, 28, saddleRelief) * highland * moderateSlope,
+      0,
+      1
+    );
+  }
+
+  private estimateLocalRiverWidth(x: number, z: number): number {
+    const span = 24;
+    let support = 0;
+    const offsets: readonly [number, number][] = [
+      [span, 0],
+      [-span, 0],
+      [0, span],
+      [0, -span]
+    ];
+    offsets.forEach(([dx, dz]) => {
+      const sample = this.generator.sample(x + dx, z + dz);
+      support += Math.max(sample.river, sample.flow * 0.45);
+    });
+    return support * 10;
+  }
 }
 
 function smoothStep(min: number, max: number, value: number): number {
@@ -333,23 +421,31 @@ function smoothStep(min: number, max: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function buildTags(
-  aLabel: string,
-  a: number,
-  bLabel: string,
-  b: number,
-  cLabel: string,
-  c: number
+function buildContextTags(
+  context: TerrainPoiContext,
+  entries: readonly [string, number][]
 ): readonly string[] {
   const tags: string[] = [];
-  if (a > 0.55) {
-    tags.push(aLabel);
+  entries.forEach(([label, value]) => {
+    if (label === "flood-risk") {
+      if (value > 0.6) {
+        tags.push(label);
+      }
+      return;
+    }
+    if (value > 0.55) {
+      tags.push(label);
+    }
+  });
+  if (context.crossingCandidate > 0.68 && !tags.includes("ford")) {
+    tags.push("ford");
   }
-  if (b > 0.55) {
-    tags.push(bLabel);
-  }
-  if (c > 0.55) {
-    tags.push(cLabel);
+  if (context.passCandidate > 0.68 && !tags.includes("pass")) {
+    tags.push("pass");
   }
   return tags;
+}
+
+function localSlopeToFlatness(slope: number): number {
+  return 1 - smoothStep(0.05, 0.24, slope);
 }

@@ -98,6 +98,8 @@ export class TerrainRoadPlanner {
     const typeBias =
       (a.kind === TerrainPoiKind.Village || b.kind === TerrainPoiKind.Village ? -22 : 0) +
       (a.kind === TerrainPoiKind.Harbor || b.kind === TerrainPoiKind.Harbor ? -12 : 0) +
+      (hasTag(a, "ford") || hasTag(b, "ford") ? -14 : 0) +
+      (hasTag(a, "pass") || hasTag(b, "pass") ? -10 : 0) +
       (a.kind === b.kind ? 18 : 0);
     return distance + typeBias;
   }
@@ -162,13 +164,19 @@ export class TerrainRoadPlanner {
     const lowlandFavor =
       1 - smoothStep(this.config.waterLevel + 42, 160, (fromSample.height + toSample.height) * 0.5);
     const flowPenalty = 1 + Math.max(fromSample.flow, toSample.flow) * 0.9;
+    const crossingBonus = this.computeCrossingBonus(fromPos.x, fromPos.z, toPos.x, toPos.z);
+    const passBonus = this.computePassBonus(toPos.x, toPos.z, toSample.height, slope);
+    const floodplainPenalty = this.computeFloodplainPenalty(fromSample, toSample, slope);
     return (
       planar *
       (1 + slope * 5.5) *
       riverPenalty *
       lakePenalty *
       flowPenalty *
-      (1 - lowlandFavor * 0.18)
+      floodplainPenalty *
+      (1 - lowlandFavor * 0.18) *
+      (1 - crossingBonus * 0.45) *
+      (1 - passBonus * 0.28)
     );
   }
 
@@ -240,6 +248,68 @@ export class TerrainRoadPlanner {
   private indexToNode(index: number): GridNode {
     return this.node(index % this.gridResolution, Math.floor(index / this.gridResolution));
   }
+
+  private computeCrossingBonus(
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number
+  ): number {
+    const midX = (fromX + toX) * 0.5;
+    const midZ = (fromZ + toZ) * 0.5;
+    const sample = this.generator.sample(midX, midZ);
+    if (sample.lake > 0.05 || sample.river < 0.04) {
+      return 0;
+    }
+
+    const widthHint = estimateCrossingWidth(this.generator, midX, midZ);
+    const narrowEnough = 1 - smoothStep(16, 40, widthHint);
+    const flatBanks = 1 - estimateLocalSlope(this.generator, midX, midZ, 10);
+    return Scalar.Clamp(
+      smoothStep(0.06, 0.22, sample.river) * narrowEnough * flatBanks,
+      0,
+      1
+    );
+  }
+
+  private computePassBonus(
+    x: number,
+    z: number,
+    height: number,
+    slope: number
+  ): number {
+    const span = this.step * 1.5;
+    const east = this.generator.sample(x + span, z).height;
+    const west = this.generator.sample(x - span, z).height;
+    const north = this.generator.sample(x, z + span).height;
+    const south = this.generator.sample(x, z - span).height;
+    const saddleRelief = Math.max(Math.min(east, west) - height, Math.min(north, south) - height);
+    const highEnough = smoothStep(72, 180, height);
+    const moderateSlope = 1 - smoothStep(0.16, 0.42, slope);
+    return Scalar.Clamp(
+      smoothStep(4, 20, saddleRelief) * highEnough * moderateSlope,
+      0,
+      1
+    );
+  }
+
+  private computeFloodplainPenalty(
+    fromSample: ReturnType<ProceduralGenerator["sample"]>,
+    toSample: ReturnType<ProceduralGenerator["sample"]>,
+    slope: number
+  ): number {
+    const flow = Math.max(fromSample.flow, toSample.flow);
+    const river = Math.max(fromSample.river, toSample.river);
+    const sediment = Math.max(fromSample.sediment, toSample.sediment);
+    const lowHeight = (fromSample.height + toSample.height) * 0.5;
+    const floodplainCore =
+      smoothStep(0.18, 0.44, flow) *
+      smoothStep(0.06, 0.26, river) *
+      smoothStep(0.1, 0.42, sediment) *
+      (1 - smoothStep(this.config.waterLevel + 18, 128, lowHeight)) *
+      (1 - smoothStep(0.05, 0.18, slope));
+    return 1 + floodplainCore * 1.8;
+  }
 }
 
 const NEIGHBOR_OFFSETS: readonly [number, number][] = [
@@ -261,6 +331,10 @@ function planarDistance(a: TerrainPoi, b: TerrainPoi): number {
 
 function buildPairKey(a: string, b: string): string {
   return [a, b].sort().join("|");
+}
+
+function hasTag(poi: TerrainPoi, tag: string): boolean {
+  return poi.tags.includes(tag);
 }
 
 function smoothStep(min: number, max: number, value: number): number {
@@ -292,6 +366,36 @@ function simplifyRoadPoints(points: readonly Vector3[]): Vector3[] {
   }
   simplified.push(points[points.length - 1]);
   return simplified;
+}
+
+function estimateCrossingWidth(
+  generator: ProceduralGenerator,
+  x: number,
+  z: number
+): number {
+  const span = 20;
+  const samples = [
+    generator.sample(x + span, z),
+    generator.sample(x - span, z),
+    generator.sample(x, z + span),
+    generator.sample(x, z - span)
+  ];
+  return samples.reduce((sum, sample) => sum + Math.max(sample.river, sample.flow * 0.4), 0) * 10;
+}
+
+function estimateLocalSlope(
+  generator: ProceduralGenerator,
+  x: number,
+  z: number,
+  step: number
+): number {
+  const left = generator.sample(x - step, z).height;
+  const right = generator.sample(x + step, z).height;
+  const down = generator.sample(x, z - step).height;
+  const up = generator.sample(x, z + step).height;
+  const gradX = (right - left) / (step * 2);
+  const gradZ = (up - down) / (step * 2);
+  return smoothStep(0.03, 0.2, Math.sqrt(gradX * gradX + gradZ * gradZ));
 }
 
 class MinPriorityQueue {

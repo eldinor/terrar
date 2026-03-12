@@ -1,8 +1,5 @@
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
-import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Scene } from "@babylonjs/core/scene";
 import { TerrainConfig } from "./TerrainConfig";
@@ -42,27 +39,6 @@ export class TerrainRoadSystem {
 
     this.roads = this.planner.generateRoads(pois);
     this.redrawRoadMask();
-    this.roads.forEach((road) => {
-      const mesh = MeshBuilder.CreateTube(
-        `road-${road.id}`,
-        {
-          path: road.points as any,
-          radius: 1.25,
-          tessellation: 6,
-          cap: Mesh.NO_CAP,
-          updatable: false
-        },
-        this.scene
-      );
-      const material = new StandardMaterial(`road-${road.id}-material`, this.scene);
-      material.diffuseColor = new Color3(0.44, 0.33, 0.18);
-      material.emissiveColor = new Color3(0.1, 0.08, 0.04);
-      material.specularColor = Color3.Black();
-      mesh.material = material;
-      mesh.alwaysSelectAsActiveMesh = true;
-      mesh.isPickable = false;
-      this.roadMeshes.push(mesh);
-    });
   }
 
   dispose(): void {

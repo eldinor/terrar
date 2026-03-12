@@ -46,6 +46,11 @@ export interface TerrainPoiConfig {
   readonly spacing: number;
 }
 
+export interface TerrainFeatureConfig {
+  readonly poi: boolean;
+  readonly roads: boolean;
+}
+
 export interface TerrainConfig {
   readonly seed: number | string;
   readonly worldMin: number;
@@ -63,6 +68,7 @@ export interface TerrainConfig {
   readonly skirtDepth: number;
   readonly baseHeight: number;
   readonly maxHeight: number;
+  readonly features: TerrainFeatureConfig;
   readonly erosion: TerrainErosionConfig;
   readonly rivers: TerrainRiverConfig;
   readonly poi: TerrainPoiConfig;
@@ -72,13 +78,14 @@ export interface TerrainConfig {
 export type TerrainConfigOverrides = Partial<
   Omit<
     TerrainConfig,
-    "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers" | "poi"
+    "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers" | "poi" | "features"
   >
 > & {
   shape?: Partial<TerrainShapeConfig>;
   erosion?: Partial<TerrainErosionConfig>;
   rivers?: Partial<TerrainRiverConfig>;
   poi?: Partial<TerrainPoiConfig>;
+  features?: Partial<TerrainFeatureConfig>;
 };
 
 export const DEFAULT_TERRAIN_SHAPE_CONFIG: TerrainShapeConfig = Object.freeze({
@@ -125,6 +132,11 @@ export const DEFAULT_TERRAIN_POI_CONFIG: TerrainPoiConfig = Object.freeze({
   spacing: 1.1
 });
 
+export const DEFAULT_TERRAIN_FEATURE_CONFIG: TerrainFeatureConfig = Object.freeze({
+  poi: false,
+  roads: false
+});
+
 export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   seed: 1337,
   worldMin: -512,
@@ -142,6 +154,7 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   skirtDepth: 12,
   baseHeight: -18,
   maxHeight: 260,
+  features: DEFAULT_TERRAIN_FEATURE_CONFIG,
   erosion: DEFAULT_TERRAIN_EROSION_CONFIG,
   rivers: DEFAULT_TERRAIN_RIVER_CONFIG,
   poi: DEFAULT_TERRAIN_POI_CONFIG,
@@ -169,6 +182,10 @@ export function mergeTerrainConfig(
   const poi = Object.freeze({
     ...DEFAULT_TERRAIN_POI_CONFIG,
     ...overrides.poi
+  });
+  const features = Object.freeze({
+    ...DEFAULT_TERRAIN_FEATURE_CONFIG,
+    ...overrides.features
   });
   const shape = Object.freeze({
     ...DEFAULT_TERRAIN_SHAPE_CONFIG,
@@ -208,6 +225,7 @@ export function mergeTerrainConfig(
     skirtDepth: overrides.skirtDepth ?? DEFAULT_TERRAIN_CONFIG.skirtDepth,
     baseHeight: overrides.baseHeight ?? DEFAULT_TERRAIN_CONFIG.baseHeight,
     maxHeight: overrides.maxHeight ?? DEFAULT_TERRAIN_CONFIG.maxHeight,
+    features,
     erosion,
     rivers,
     poi,

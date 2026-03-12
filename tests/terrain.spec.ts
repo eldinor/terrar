@@ -325,6 +325,16 @@ describe("POI planning", () => {
     expect(sites.length).toBeGreaterThan(0);
     expect(new Set(sites.map((site) => site.kind)).size).toBeGreaterThan(1);
   });
+
+  it("keeps villages out of floodplain-core tags by default", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+    const sites = planner.generateSites();
+
+    const villages = sites.filter((site) => site.kind === "village");
+    expect(villages.length).toBeGreaterThan(0);
+    expect(villages.some((site) => site.tags.includes("flood-risk"))).toBe(false);
+  });
 });
 
 describe("Road planning", () => {
@@ -351,6 +361,50 @@ describe("Road planning", () => {
 
     expect(roads.length).toBeGreaterThan(0);
     expect(roads.some((road) => road.points.length >= 2)).toBe(true);
+  });
+
+  it("flattens chunk terrain near planned roads", () => {
+    const config = DEFAULT_TERRAIN_CONFIG;
+    const generator = new ProceduralGenerator(config);
+    const pois = new TerrainPoiPlanner(config, generator).generateSites();
+    const roads = new TerrainRoadPlanner(config, generator).generateRoads(pois);
+    const road = roads.find((candidate) => candidate.points.length >= 3) ?? roads[0];
+    const point = road.points[Math.floor(road.points.length / 2)];
+    const chunkX = Math.max(
+      0,
+      Math.min(
+        config.chunksPerAxis - 1,
+        Math.floor((point.x - config.worldMin) / config.chunkSize)
+      )
+    );
+    const chunkZ = Math.max(
+      0,
+      Math.min(
+        config.chunksPerAxis - 1,
+        Math.floor((point.z - config.worldMin) / config.chunkSize)
+      )
+    );
+    const unshapedChunk = new TerrainChunkData(chunkX, chunkZ, config, generator);
+    const shapedChunk = new TerrainChunkData(chunkX, chunkZ, config, generator, roads);
+    const unshapedGrid = unshapedChunk.getGrid(0);
+    const shapedGrid = shapedChunk.getGrid(0);
+    const sampleX = Math.max(
+      0,
+      Math.min(
+        unshapedGrid.resolution - 1,
+        Math.round((point.x - unshapedChunk.minX) / unshapedGrid.step)
+      )
+    );
+    const sampleZ = Math.max(
+      0,
+      Math.min(
+        unshapedGrid.resolution - 1,
+        Math.round((point.z - unshapedChunk.minZ) / unshapedGrid.step)
+      )
+    );
+    const index = sampleZ * unshapedGrid.resolution + sampleX;
+
+    expect(shapedGrid.heights[index]).toBeLessThan(unshapedGrid.heights[index]);
   });
 });
 

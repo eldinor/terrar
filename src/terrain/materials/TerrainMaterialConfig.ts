@@ -11,6 +11,7 @@ export interface TerrainLayerThresholds {
 export interface TerrainTextureScaleConfig {
   grassScale: number;
   dirtScale: number;
+  sandScale: number;
   rockScale: number;
   snowScale: number;
   macroScale: number;
@@ -19,6 +20,8 @@ export interface TerrainTextureScaleConfig {
 export interface TerrainMaterialConfig {
   thresholds: TerrainLayerThresholds;
   scales: TerrainTextureScaleConfig;
+  shorelineStartOffset: number;
+  shorelineEndOffset: number;
   blendSharpness: number;
   triplanarSharpness: number;
   normalStrength: number;
@@ -38,10 +41,13 @@ export const DEFAULT_TERRAIN_MATERIAL_CONFIG: TerrainMaterialConfig = Object.fre
   scales: Object.freeze({
     grassScale: 0.11,
     dirtScale: 0.1,
+    sandScale: 0.09,
     rockScale: 0.08,
     snowScale: 0.07,
     macroScale: 0.008
   }),
+  shorelineStartOffset: 1.5,
+  shorelineEndOffset: 16,
   blendSharpness: 1.2,
   triplanarSharpness: 4,
   normalStrength: 1,
@@ -67,7 +73,9 @@ export function createTerrainMaterialConfigForHeightRange(
     },
     scales: {
       ...DEFAULT_TERRAIN_MATERIAL_CONFIG.scales
-    }
+    },
+    shorelineStartOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineStartOffset,
+    shorelineEndOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineEndOffset
   };
 }
 
@@ -77,6 +85,8 @@ export function cloneTerrainMaterialConfig(
   return {
     thresholds: { ...config.thresholds },
     scales: { ...config.scales },
+    shorelineStartOffset: config.shorelineStartOffset,
+    shorelineEndOffset: config.shorelineEndOffset,
     blendSharpness: config.blendSharpness,
     triplanarSharpness: config.triplanarSharpness,
     normalStrength: config.normalStrength,

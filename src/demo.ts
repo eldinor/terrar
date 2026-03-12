@@ -275,6 +275,62 @@ function renderPanel(): void {
       renderPanel();
     })
   );
+  panel.appendChild(
+    createSlider("Grass Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.grassScale, (value) => {
+      draftConfig.materialScales.grassScale = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Dirt Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.dirtScale, (value) => {
+      draftConfig.materialScales.dirtScale = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Sand Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.sandScale, (value) => {
+      draftConfig.materialScales.sandScale = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Rock Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.rockScale, (value) => {
+      draftConfig.materialScales.rockScale = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Snow Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.snowScale, (value) => {
+      draftConfig.materialScales.snowScale = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Macro Scale", 0.001, 0.03, 0.001, draftConfig.materialScales.macroScale, (value) => {
+      draftConfig.materialScales.macroScale = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Blend Sharpness", 0.5, 3, 0.05, draftConfig.blendSharpness, (value) => {
+      draftConfig.blendSharpness = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Beach Start", 0, 8, 0.5, draftConfig.shorelineStartOffset, (value) => {
+      draftConfig.shorelineStartOffset = Math.min(value, draftConfig.shorelineEndOffset - 0.5);
+      applyDraftMaterialConfig();
+      renderPanel();
+    })
+  );
+  panel.appendChild(
+    createSlider("Beach End", 2, 40, 0.5, draftConfig.shorelineEndOffset, (value) => {
+      draftConfig.shorelineEndOffset = Math.max(value, draftConfig.shorelineStartOffset + 0.5);
+      applyDraftMaterialConfig();
+      renderPanel();
+    })
+  );
 
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Regenerate"));
@@ -471,11 +527,30 @@ function applyDraftToWorld(): void {
   demo.setFoliageRadius(draftConfig.foliageRadius);
   demo.setLodDistances(draftConfig.lodDistances);
   demo.setWaterLevel(draftConfig.waterLevel);
-  demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+  applyDraftMaterialConfig();
   debugVisible = false;
   renderHud();
   draftConfig = buildDraftConfig();
   renderPanel();
+}
+
+function applyDraftMaterialConfig(): void {
+  const config = demo.getTerrainMaterialConfig();
+  config.thresholds = { ...draftConfig.materialThresholds };
+  config.scales = {
+    ...config.scales,
+    grassScale: draftConfig.materialScales.grassScale,
+    dirtScale: draftConfig.materialScales.dirtScale,
+    sandScale: draftConfig.materialScales.sandScale
+    ,
+    rockScale: draftConfig.materialScales.rockScale,
+    snowScale: draftConfig.materialScales.snowScale,
+    macroScale: draftConfig.materialScales.macroScale
+  };
+  config.blendSharpness = draftConfig.blendSharpness;
+  config.shorelineStartOffset = draftConfig.shorelineStartOffset;
+  config.shorelineEndOffset = draftConfig.shorelineEndOffset;
+  demo.setTerrainMaterialConfig(config);
 }
 
 function buildDraftConfig(): DraftConfig {
@@ -489,6 +564,10 @@ function buildDraftConfig(): DraftConfig {
     foliageRadius: demo.getFoliageRadius(),
     lodDistances: [...demo.getLodDistances()] as [number, number, number],
     materialThresholds: { ...demo.getTerrainMaterialThresholds() },
+    materialScales: { ...demo.getTerrainMaterialConfig().scales },
+    blendSharpness: demo.getTerrainMaterialConfig().blendSharpness,
+    shorelineStartOffset: demo.getTerrainMaterialConfig().shorelineStartOffset,
+    shorelineEndOffset: demo.getTerrainMaterialConfig().shorelineEndOffset,
     shape: { ...config.shape }
   };
 }
@@ -521,6 +600,10 @@ function mergeDraftWithOverrides(
       ? [...overrides.lodDistances]
       : [...base.lodDistances]) as [number, number, number],
     materialThresholds: { ...base.materialThresholds },
+    materialScales: { ...base.materialScales },
+    blendSharpness: base.blendSharpness,
+    shorelineStartOffset: base.shorelineStartOffset,
+    shorelineEndOffset: base.shorelineEndOffset,
     shape: {
       ...base.shape,
       ...overrides.shape
@@ -674,6 +757,17 @@ interface DraftConfig {
   foliageRadius: number;
   lodDistances: [number, number, number];
   materialThresholds: TerrainLayerThresholds;
+  materialScales: {
+    grassScale: number;
+    dirtScale: number;
+    sandScale: number;
+    rockScale: number;
+    snowScale: number;
+    macroScale: number;
+  };
+  blendSharpness: number;
+  shorelineStartOffset: number;
+  shorelineEndOffset: number;
   shape: MutableTerrainShapeConfig;
 }
 

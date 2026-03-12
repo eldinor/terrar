@@ -60,7 +60,11 @@ export class TerrainSystem {
       this.foliagePlanner,
       this.config
     );
-    this.waterSystem = new TerrainWaterSystem(this.scene, this.config);
+    this.waterSystem = new TerrainWaterSystem(
+      this.scene,
+      this.config,
+      this.generator
+    );
     this.lodController = new TerrainLODController(this.config);
     this.lodDistances = [...this.config.lodDistances];
     this.collisionRadius = this.config.collisionRadius;
@@ -74,6 +78,7 @@ export class TerrainSystem {
 
     this.material = TerrainMeshBuilder.createSharedMaterial(this.scene, this.config);
     this.materialConfig = TerrainMaterialFactory.getConfig(this.material);
+    TerrainMaterialFactory.setWaterLevel(this.material, this.config.waterLevel);
 
     for (let chunkZ = 0; chunkZ < this.config.chunksPerAxis; chunkZ += 1) {
       const row: TerrainChunk[] = [];
@@ -219,6 +224,9 @@ export class TerrainSystem {
 
   setWaterLevel(level: number): void {
     this.waterSystem.setWaterLevel(level);
+    if (this.material) {
+      TerrainMaterialFactory.setWaterLevel(this.material, level);
+    }
   }
 
   getWaterLevel(): number {

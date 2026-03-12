@@ -9,7 +9,7 @@ export interface TerrainTextureLayer {
 export interface TerrainTextureSet {
   grass: TerrainTextureLayer;
   dirt: TerrainTextureLayer;
+  sand: TerrainTextureLayer;
   rock: TerrainTextureLayer;
   snow: TerrainTextureLayer;
 }
-

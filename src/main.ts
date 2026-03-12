@@ -9,7 +9,8 @@ import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
 import {
   TerrainDebugViewMode,
   TerrainLayerThresholds,
-  TerrainMaterialConfig
+  TerrainMaterialConfig,
+  TerrainTextureOptions
 } from "./terrain/materials";
 import { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
 
@@ -36,6 +37,8 @@ export interface TerrainDemo {
   readonly getTerrainMaterialConfig: () => TerrainMaterialConfig;
   readonly setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) => void;
   readonly getTerrainMaterialThresholds: () => TerrainLayerThresholds;
+  readonly setUseGeneratedTextures: (enabled: boolean) => void;
+  readonly getUseGeneratedTextures: () => boolean;
   readonly rebuildTerrain: (overrides: TerrainConfigOverrides) => void;
   readonly getTerrainConfig: () => TerrainConfig;
   readonly getFoliageStats: () => TerrainFoliageStats;
@@ -43,7 +46,8 @@ export interface TerrainDemo {
 
 export function createTerrainDemo(
   canvas: HTMLCanvasElement,
-  overrides: TerrainConfigOverrides = {}
+  overrides: TerrainConfigOverrides = {},
+  textureOptions: TerrainTextureOptions = {}
 ): TerrainDemo {
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
@@ -64,7 +68,7 @@ export function createTerrainDemo(
   const light = new HemisphericLight("terrain-light", new Vector3(0.4, 1, 0.2), scene);
   light.intensity = 0.95;
 
-  let terrainSystem = new TerrainSystem(scene, overrides);
+  let terrainSystem = new TerrainSystem(scene, overrides, textureOptions);
   terrainSystem.initialize();
   terrainSystem.update(camera.position);
 
@@ -108,11 +112,44 @@ export function createTerrainDemo(
     setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) =>
       terrainSystem.setTerrainMaterialThresholds(thresholds),
     getTerrainMaterialThresholds: () => terrainSystem.getTerrainMaterialThresholds(),
+    setUseGeneratedTextures: (enabled: boolean) => {
+      const nextTextureOptions = {
+        ...terrainSystem.getTextureOptions(),
+        useGeneratedTextures: enabled
+      };
+      const wireframe = terrainSystem.getWireframe();
+      const debugViewMode = terrainSystem.getDebugViewMode();
+      const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
+      const waterLevel = terrainSystem.getWaterLevel();
+      const waterConfig = terrainSystem.getWaterConfig();
+      const collisionRadius = terrainSystem.getCollisionRadius();
+      const foliageRadius = terrainSystem.getFoliageRadius();
+      const lodDistances = terrainSystem.getLodDistances();
+      const config = terrainSystem.getConfig();
+      terrainSystem.dispose();
+      terrainSystem = new TerrainSystem(scene, config, nextTextureOptions);
+      terrainSystem.initialize();
+      terrainSystem.setWireframe(wireframe);
+      terrainSystem.setCollisionRadius(collisionRadius);
+      terrainSystem.setFoliageRadius(foliageRadius);
+      terrainSystem.setLodDistances(lodDistances);
+      terrainSystem.setWaterLevel(waterLevel);
+      terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
+      terrainSystem.setWaterConfig(waterConfig);
+      terrainSystem.setDebugViewMode(debugViewMode);
+      terrainSystem.update(camera.position);
+    },
+    getUseGeneratedTextures: () => terrainSystem.getTextureOptions().useGeneratedTextures,
     rebuildTerrain: (nextOverrides: TerrainConfigOverrides) => {
       const wireframe = terrainSystem.getWireframe();
       const debugViewMode = terrainSystem.getDebugViewMode();
       const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
+      const waterLevel = terrainSystem.getWaterLevel();
       const waterConfig = terrainSystem.getWaterConfig();
+      const collisionRadius = terrainSystem.getCollisionRadius();
+      const foliageRadius = terrainSystem.getFoliageRadius();
+      const lodDistances = terrainSystem.getLodDistances();
+      const currentTextureOptions = terrainSystem.getTextureOptions();
       const config = terrainSystem.getConfig();
       const mergedOverrides: TerrainConfigOverrides = {
         ...config,
@@ -123,9 +160,17 @@ export function createTerrainDemo(
         }
       };
       terrainSystem.dispose();
-      terrainSystem = new TerrainSystem(scene, mergedOverrides);
+      terrainSystem = new TerrainSystem(scene, mergedOverrides, currentTextureOptions);
       terrainSystem.initialize();
       terrainSystem.setWireframe(wireframe);
+      terrainSystem.setCollisionRadius(
+        nextOverrides.collisionRadius ?? collisionRadius
+      );
+      terrainSystem.setFoliageRadius(
+        nextOverrides.foliageRadius ?? foliageRadius
+      );
+      terrainSystem.setLodDistances(nextOverrides.lodDistances ?? lodDistances);
+      terrainSystem.setWaterLevel(nextOverrides.waterLevel ?? waterLevel);
       terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
       terrainSystem.setWaterConfig(waterConfig);
       terrainSystem.setDebugViewMode(debugViewMode);

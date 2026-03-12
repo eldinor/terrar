@@ -9,6 +9,7 @@ import { TerrainBiome } from "./TerrainBiome";
 import { TerrainConfig, TerrainLODLevel } from "./TerrainConfig";
 import {
   createTerrainMaterialConfigForHeightRange,
+  TerrainTextureOptions,
   TerrainMaterialFactory
 } from "./materials";
 
@@ -35,14 +36,19 @@ export class TerrainMeshBuilder {
     return mesh;
   }
 
-  static createSharedMaterial(scene: Scene, config: TerrainConfig): ShaderMaterial {
+  static createSharedMaterial(
+    scene: Scene,
+    config: TerrainConfig,
+    textureOptions?: TerrainTextureOptions
+  ): ShaderMaterial {
     return TerrainMaterialFactory.createTerrainMaterial(
       scene,
       undefined,
       createTerrainMaterialConfigForHeightRange(
         config.baseHeight,
         config.maxHeight
-      )
+      ),
+      textureOptions
     );
   }
 

@@ -13,12 +13,25 @@ import {
 import { TerrainDebugViewMode } from "./TerrainMaterialDebug";
 import { TerrainTextureSet } from "./TerrainTextureSet";
 
+export interface TerrainTextureOptions {
+  useGeneratedTextures?: boolean;
+  maxTextureSize?: number;
+}
+
+export const DEFAULT_TERRAIN_TEXTURE_OPTIONS: Required<TerrainTextureOptions> = Object.freeze({
+  useGeneratedTextures: true,
+  maxTextureSize: 512
+});
+
 export class TerrainMaterialFactory {
   static createTerrainMaterial(
     scene: Scene,
-    textures: TerrainTextureSet = this.createDefaultTextureSet(scene),
-    config: TerrainMaterialConfig = DEFAULT_TERRAIN_MATERIAL_CONFIG
+    textures?: TerrainTextureSet,
+    config: TerrainMaterialConfig = DEFAULT_TERRAIN_MATERIAL_CONFIG,
+    textureOptions: TerrainTextureOptions = DEFAULT_TERRAIN_TEXTURE_OPTIONS
   ): ShaderMaterial {
+    const resolvedTextures =
+      textures ?? this.createDefaultTextureSet(scene, textureOptions);
     ensureTerrainBlendShadersRegistered();
 
     const material = new ShaderMaterial("terrain-material", scene, "terrainBlend", {
@@ -56,11 +69,11 @@ export class TerrainMaterialFactory {
     });
 
     material.backFaceCulling = false;
-    material.setTexture("grassAlbedo", textures.grass.albedo);
-    material.setTexture("dirtAlbedo", textures.dirt.albedo);
-    material.setTexture("sandAlbedo", textures.sand.albedo);
-    material.setTexture("rockAlbedo", textures.rock.albedo);
-    material.setTexture("snowAlbedo", textures.snow.albedo);
+    material.setTexture("grassAlbedo", resolvedTextures.grass.albedo);
+    material.setTexture("dirtAlbedo", resolvedTextures.dirt.albedo);
+    material.setTexture("sandAlbedo", resolvedTextures.sand.albedo);
+    material.setTexture("rockAlbedo", resolvedTextures.rock.albedo);
+    material.setTexture("snowAlbedo", resolvedTextures.snow.albedo);
     material.setVector3(
       "lightDirection",
       new Vector3(-0.45, 0.9, 0.3).normalize()
@@ -126,7 +139,46 @@ export class TerrainMaterialFactory {
     material.setFloat("waterLevel", waterLevel);
   }
 
-  private static createDefaultTextureSet(scene: Scene): TerrainTextureSet {
+  private static createDefaultTextureSet(
+    scene: Scene,
+    textureOptions: TerrainTextureOptions = DEFAULT_TERRAIN_TEXTURE_OPTIONS
+  ): TerrainTextureSet {
+    const options = {
+      ...DEFAULT_TERRAIN_TEXTURE_OPTIONS,
+      ...textureOptions
+    };
+
+    if (!options.useGeneratedTextures && typeof window !== "undefined") {
+      return this.createLocalTextureSet(scene, options.maxTextureSize);
+    }
+
+    return this.createGeneratedTextureSet(scene);
+  }
+
+  private static createLocalTextureSet(
+    scene: Scene,
+    maxTextureSize: number
+  ): TerrainTextureSet {
+    return {
+      grass: {
+        albedo: createFileTexture(scene, "/assets/terrain/grass.jpg", maxTextureSize)
+      },
+      dirt: {
+        albedo: createFileTexture(scene, "/assets/terrain/dirt.jpg", maxTextureSize)
+      },
+      sand: {
+        albedo: createFileTexture(scene, "/assets/terrain/sand.jpg", maxTextureSize)
+      },
+      rock: {
+        albedo: createFileTexture(scene, "/assets/terrain/rock.png", maxTextureSize)
+      },
+      snow: {
+        albedo: createFileTexture(scene, "/assets/terrain/snow.png", maxTextureSize)
+      }
+    };
+  }
+
+  private static createGeneratedTextureSet(scene: Scene): TerrainTextureSet {
     const size = 192;
 
     return {
@@ -461,6 +513,64 @@ function createLayerTexture(
   texture.wrapU = Texture.WRAP_ADDRESSMODE;
   texture.wrapV = Texture.WRAP_ADDRESSMODE;
   return texture;
+}
+
+function createFileTexture(
+  scene: Scene,
+  url: string,
+  maxTextureSize: number
+): Texture {
+  const texture = new Texture(
+    url,
+    scene,
+    true,
+    false,
+    Texture.TRILINEAR_SAMPLINGMODE
+  );
+  texture.wrapU = Texture.WRAP_ADDRESSMODE;
+  texture.wrapV = Texture.WRAP_ADDRESSMODE;
+  downscaleTextureOnLoad(texture, url, maxTextureSize);
+  return texture;
+}
+
+function downscaleTextureOnLoad(
+  texture: Texture,
+  url: string,
+  maxTextureSize: number
+): void {
+  if (
+    typeof window === "undefined" ||
+    typeof document === "undefined" ||
+    maxTextureSize <= 0
+  ) {
+    return;
+  }
+
+  texture.onLoadObservable.addOnce(() => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      const largestDimension = Math.max(image.width, image.height);
+      if (largestDimension <= maxTextureSize) {
+        return;
+      }
+
+      const scale = maxTextureSize / largestDimension;
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      texture.updateURL(url, canvas.toDataURL("image/png"));
+    };
+    image.src = url;
+  });
 }
 
 function rgba(r: number, g: number, b: number, a = 255): [number, number, number, number] {

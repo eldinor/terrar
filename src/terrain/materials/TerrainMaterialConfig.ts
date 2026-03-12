@@ -46,7 +46,7 @@ export const DEFAULT_TERRAIN_MATERIAL_CONFIG: TerrainMaterialConfig = Object.fre
     rockScale: 0.08,
     snowScale: 0.07,
     macroScale: 0.008,
-    antiTileStrength: 0.45
+    antiTileStrength: 0.6
   }),
   shorelineStartOffset: 1.5,
   shorelineEndOffset: 16,

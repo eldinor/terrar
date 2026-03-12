@@ -247,7 +247,7 @@ function renderRuntimeTab(): void {
     })
   );
   panel.appendChild(
-    createSlider("Foliage", 120, 520, 10, draftConfig.foliageRadius, (value) => {
+    createSlider("Foliage", 120, 2000, 10, draftConfig.foliageRadius, (value) => {
       draftConfig.foliageRadius = value;
       demo.setFoliageRadius(value);
     })
@@ -305,6 +305,12 @@ function renderRuntimeTab(): void {
 
 function renderMaterialTab(): void {
   panel.appendChild(createSectionLabel("Material Blend"));
+  panel.appendChild(
+    createCheckbox("Use Generated Textures", draftConfig.useGeneratedTextures, (checked) => {
+      draftConfig.useGeneratedTextures = checked;
+      demo.setUseGeneratedTextures(checked);
+    })
+  );
   panel.appendChild(
     createSlider("Rock Start", 0.05, 0.9, 0.01, draftConfig.materialThresholds.rockSlopeStart, (value) => {
       draftConfig.materialThresholds.rockSlopeStart = Math.min(
@@ -650,6 +656,35 @@ function createDebugModeControl(): HTMLElement {
   return row;
 }
 
+function createCheckbox(
+  label: string,
+  initialValue: boolean,
+  onChange: (checked: boolean) => void
+): HTMLElement {
+  const row = document.createElement("label");
+  row.style.display = "flex";
+  row.style.alignItems = "center";
+  row.style.gap = "8px";
+  row.style.marginTop = "10px";
+  row.style.width = "100%";
+  row.style.minWidth = "0";
+  row.style.boxSizing = "border-box";
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = initialValue;
+  input.style.flex = "0 0 auto";
+  input.addEventListener("change", () => onChange(input.checked));
+
+  const title = document.createElement("span");
+  title.textContent = label;
+  title.style.minWidth = "0";
+
+  row.appendChild(input);
+  row.appendChild(title);
+  return row;
+}
+
 function createActionButtons(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.style.display = "grid";
@@ -760,6 +795,7 @@ function buildDraftConfig(): DraftConfig {
   const config = demo.getTerrainConfig();
   return {
     seed: String(config.seed),
+    useGeneratedTextures: demo.getUseGeneratedTextures(),
     baseHeight: config.baseHeight,
     maxHeight: config.maxHeight,
     waterLevel: demo.getWaterLevel(),
@@ -795,6 +831,7 @@ function mergeDraftWithOverrides(
 ): DraftConfig {
   return {
     seed: String(overrides.seed ?? base.seed),
+    useGeneratedTextures: base.useGeneratedTextures,
     baseHeight: overrides.baseHeight ?? base.baseHeight,
     maxHeight: overrides.maxHeight ?? base.maxHeight,
     waterLevel: overrides.waterLevel ?? base.waterLevel,
@@ -1002,6 +1039,7 @@ function getDecimalPlaces(step: number): number {
 
 interface DraftConfig {
   seed: string;
+  useGeneratedTextures: boolean;
   baseHeight: number;
   maxHeight: number;
   waterLevel: number;

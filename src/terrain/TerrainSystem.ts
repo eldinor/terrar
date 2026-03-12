@@ -22,7 +22,8 @@ import {
   TerrainDebugViewMode,
   TerrainLayerThresholds,
   TerrainMaterialConfig,
-  TerrainMaterialFactory
+  TerrainMaterialFactory,
+  TerrainTextureOptions
 } from "./materials";
 
 export class TerrainSystem {
@@ -42,18 +43,25 @@ export class TerrainSystem {
   private foliageRadius: number;
   private debugViewMode = TerrainDebugViewMode.Final;
   private materialConfig: TerrainMaterialConfig | null = null;
+  private readonly textureOptions: Required<TerrainTextureOptions>;
   private elapsedTimeSeconds = 0;
   private initialized = false;
 
   constructor(
     private readonly scene: Scene,
-    overrides: TerrainConfigOverrides = {}
+    overrides: TerrainConfigOverrides = {},
+    textureOptions: TerrainTextureOptions = {}
   ) {
     this.config = mergeTerrainConfig({
       ...DEFAULT_TERRAIN_CONFIG,
       ...overrides
     });
     this.generator = new ProceduralGenerator(this.config);
+    this.textureOptions = {
+      useGeneratedTextures: true,
+      maxTextureSize: 512,
+      ...textureOptions
+    };
     this.foliagePlanner = new TerrainFoliagePlanner(this.config, this.config.seed);
     this.foliageSystem = new TerrainFoliageSystem(
       this.scene,
@@ -76,7 +84,11 @@ export class TerrainSystem {
       return;
     }
 
-    this.material = TerrainMeshBuilder.createSharedMaterial(this.scene, this.config);
+    this.material = TerrainMeshBuilder.createSharedMaterial(
+      this.scene,
+      this.config,
+      this.textureOptions
+    );
     this.materialConfig = TerrainMaterialFactory.getConfig(this.material);
     TerrainMaterialFactory.setWaterLevel(this.material, this.config.waterLevel);
 
@@ -267,6 +279,10 @@ export class TerrainSystem {
 
   getConfig(): TerrainConfig {
     return this.config;
+  }
+
+  getTextureOptions(): Required<TerrainTextureOptions> {
+    return { ...this.textureOptions };
   }
 
   getFoliageStats(): TerrainFoliageStats {

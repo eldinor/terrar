@@ -402,6 +402,12 @@ function renderMaterialTab(): void {
     })
   );
   panel.appendChild(
+    createSlider("Anti-Tile", 0, 1, 0.01, draftConfig.materialScales.antiTileStrength, (value) => {
+      draftConfig.materialScales.antiTileStrength = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
     createSlider("Blend Sharpness", 0.5, 3, 0.05, draftConfig.blendSharpness, (value) => {
       draftConfig.blendSharpness = value;
       applyDraftMaterialConfig();
@@ -737,7 +743,8 @@ function applyDraftMaterialConfig(): void {
     sandScale: draftConfig.materialScales.sandScale,
     rockScale: draftConfig.materialScales.rockScale,
     snowScale: draftConfig.materialScales.snowScale,
-    macroScale: draftConfig.materialScales.macroScale
+    macroScale: draftConfig.materialScales.macroScale,
+    antiTileStrength: draftConfig.materialScales.antiTileStrength
   };
   config.blendSharpness = draftConfig.blendSharpness;
   config.shorelineStartOffset = draftConfig.shorelineStartOffset;
@@ -1010,6 +1017,7 @@ interface DraftConfig {
     rockScale: number;
     snowScale: number;
     macroScale: number;
+    antiTileStrength: number;
   };
   blendSharpness: number;
   shorelineStartOffset: number;

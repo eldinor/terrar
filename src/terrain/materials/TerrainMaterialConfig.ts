@@ -15,6 +15,7 @@ export interface TerrainTextureScaleConfig {
   rockScale: number;
   snowScale: number;
   macroScale: number;
+  antiTileStrength: number;
 }
 
 export interface TerrainMaterialConfig {
@@ -44,7 +45,8 @@ export const DEFAULT_TERRAIN_MATERIAL_CONFIG: TerrainMaterialConfig = Object.fre
     sandScale: 0.09,
     rockScale: 0.08,
     snowScale: 0.07,
-    macroScale: 0.008
+    macroScale: 0.008,
+    antiTileStrength: 0.45
   }),
   shorelineStartOffset: 1.5,
   shorelineEndOffset: 16,

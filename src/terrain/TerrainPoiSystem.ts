@@ -45,7 +45,8 @@ export class TerrainPoiSystem {
 
   constructor(
     private readonly scene: Scene,
-    private readonly planner: TerrainPoiPlanner
+    private readonly planner: TerrainPoiPlanner,
+    private readonly prebuiltSites: readonly TerrainPoi[] = []
   ) {
     this.root = this.createRootElement();
   }
@@ -55,7 +56,10 @@ export class TerrainPoiSystem {
       return;
     }
 
-    this.sites = this.planner.generateSites();
+    this.sites =
+      this.prebuiltSites.length > 0
+        ? [...this.prebuiltSites]
+        : this.planner.generateSites();
     this.sites.forEach((site) => {
       this.meshes.push(this.createMarker(site));
       this.labels.push(this.createLabel(site));

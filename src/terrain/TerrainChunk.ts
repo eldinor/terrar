@@ -37,10 +37,18 @@ export class TerrainChunk {
         this.material,
         this.config
       );
-      this.meshes.set(lod, mesh);
+      this.setMesh(lod, mesh);
     });
 
-    this.setLOD(3);
+    this.setLOD(this.getLOD());
+  }
+
+  setMesh(lod: TerrainLODLevel, mesh: Mesh): void {
+    this.meshes.get(lod)?.dispose(false, true);
+    this.meshes.set(lod, mesh);
+    const enabled = lod === this.getLOD();
+    mesh.setEnabled(enabled);
+    mesh.checkCollisions = enabled && this.collisionsEnabled;
   }
 
   getLOD(): TerrainLODLevel {
@@ -74,7 +82,7 @@ export class TerrainChunk {
   setCollision(enabled: boolean): void {
     this.collisionsEnabled = enabled;
     this.meshes.forEach((mesh, lod) => {
-        mesh.checkCollisions = enabled && lod === this.activeLod;
+      mesh.checkCollisions = enabled && lod === this.activeLod;
     });
   }
 

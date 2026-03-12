@@ -12,6 +12,17 @@ export interface TerrainSample {
   readonly sediment: number;
 }
 
+export interface ProceduralGeneratorSnapshot {
+  readonly analysisResolution: number;
+  readonly analysisStep: number;
+  readonly terrainHeightField: Float32Array | null;
+  readonly flowField: Float32Array | null;
+  readonly riverField: Float32Array | null;
+  readonly lakeField: Float32Array | null;
+  readonly lakeSurfaceField: Float32Array | null;
+  readonly sedimentField: Float32Array | null;
+}
+
 interface FbmOptions {
   readonly frequency: number;
   readonly octaves: number;
@@ -31,14 +42,28 @@ export class ProceduralGenerator {
   private readonly analysisResolution: number;
   private readonly analysisStep: number;
 
-  constructor(private readonly config: TerrainConfig) {
+  constructor(
+    private readonly config: TerrainConfig,
+    snapshot: ProceduralGeneratorSnapshot | null = null
+  ) {
     this.seed = normalizeSeed(config.seed);
     this.worldHalfExtent = config.worldSize * 0.5;
-    this.analysisResolution = Math.max(
-      2,
-      Math.max(config.erosion.resolution, config.rivers.resolution) | 0
-    );
-    this.analysisStep = config.worldSize / (this.analysisResolution - 1);
+    this.analysisResolution =
+      snapshot?.analysisResolution ??
+      Math.max(2, Math.max(config.erosion.resolution, config.rivers.resolution) | 0);
+    this.analysisStep =
+      snapshot?.analysisStep ??
+      (config.worldSize / (this.analysisResolution - 1));
+
+    if (snapshot) {
+      this.terrainHeightField = cloneField(snapshot.terrainHeightField);
+      this.flowField = cloneField(snapshot.flowField);
+      this.riverField = cloneField(snapshot.riverField);
+      this.lakeField = cloneField(snapshot.lakeField);
+      this.lakeSurfaceField = cloneField(snapshot.lakeSurfaceField);
+      this.sedimentField = cloneField(snapshot.sedimentField);
+      return;
+    }
 
     const usesCachedHeightfield = config.erosion.enabled || config.rivers.enabled;
     if (!usesCachedHeightfield) {
@@ -109,6 +134,19 @@ export class ProceduralGenerator {
     }
 
     this.terrainHeightField = heights;
+  }
+
+  createSnapshot(): ProceduralGeneratorSnapshot {
+    return {
+      analysisResolution: this.analysisResolution,
+      analysisStep: this.analysisStep,
+      terrainHeightField: cloneField(this.terrainHeightField),
+      flowField: cloneField(this.flowField),
+      riverField: cloneField(this.riverField),
+      lakeField: cloneField(this.lakeField),
+      lakeSurfaceField: cloneField(this.lakeSurfaceField),
+      sedimentField: cloneField(this.sedimentField)
+    };
   }
 
   sample(x: number, z: number): TerrainSample {
@@ -403,6 +441,10 @@ export class ProceduralGenerator {
     h ^= h >>> 16;
     return (h >>> 0) / 4294967295;
   }
+}
+
+function cloneField(field: Float32Array | null): Float32Array | null {
+  return field ? new Float32Array(field) : null;
 }
 
 function normalizeSeed(seed: number | string): number {

@@ -91,6 +91,9 @@ mount.appendChild(canvas);
 
 const demo = createTerrainDemo(canvas);
 type PanelTab = "runtime" | "material" | "world" | "presets";
+let buildStatus = demo.getBuildStatus();
+let featureBuildStatusText: HTMLDivElement | null = null;
+const workerStatus = demo.getWorkerStatus();
 
 const hud = document.createElement("div");
 hud.style.position = "fixed";
@@ -158,18 +161,29 @@ function renderHud(): void {
   const foliage = demo.getFoliageStats();
   const poi = demo.getPoiStats();
   const roads = demo.getRoadStats();
+  const workerText = workerStatus.sharedSnapshotsEnabled
+    ? "sab:on"
+    : workerStatus.workersEnabled
+      ? "sab:off"
+      : "workers:off";
+  const buildText = buildStatus.phase === "idle" ? "" : ` | build: ${buildStatus.message}`;
   hud.textContent =
     `G debug: ${debugState} | V wireframe: ${wireframe ? "on" : "off"} | ` +
     `foliage: ${foliage.visibleInstances}/${foliage.totalInstances} ` +
     `(T ${foliage.visibleTrees}/${foliage.totalTrees}, ` +
     `B ${foliage.visibleBushes}/${foliage.totalBushes}, ` +
     `R ${foliage.visibleRocks}/${foliage.totalRocks}) | ` +
-    `poi: ${poi.total} | roads: ${roads.totalRoads}`;
+    `poi: ${poi.total} | roads: ${roads.totalRoads} | ${workerText}${buildText}`;
 }
 
 renderHud();
 renderPanel();
 renderFeaturePanel();
+demo.subscribeBuildStatus((status) => {
+  buildStatus = status;
+  renderHud();
+  updateFeatureBuildStatus();
+});
 
 window.addEventListener("keydown", async (event) => {
   if (event.repeat) {
@@ -235,7 +249,7 @@ function renderFeaturePanel(): void {
   featurePanel.appendChild(createFeatureBuildStatus());
   featurePanel.appendChild(
     createButton("Apply Features", () => {
-      applyDraftToWorld();
+      return applyDraftToWorld();
     })
   );
 
@@ -417,7 +431,7 @@ function renderMaterialTab(): void {
   panel.appendChild(
     createCheckbox("Use Generated Textures", draftConfig.useGeneratedTextures, (checked) => {
       draftConfig.useGeneratedTextures = checked;
-      demo.setUseGeneratedTextures(checked);
+      runAsyncTask(demo.setUseGeneratedTextures(checked));
     })
   );
   panel.appendChild(
@@ -577,6 +591,21 @@ function renderWorldTab(): void {
   panel.appendChild(createTextInput("Seed", draftConfig.seed, (value) => {
     draftConfig.seed = value.trim() === "" ? "1337" : value;
   }));
+  panel.appendChild(createDivider());
+  panel.appendChild(createSectionLabel("World Size"));
+  panel.appendChild(
+    createSlider("Chunks / Axis", 6, 16, 1, draftConfig.chunksPerAxis, (value) => {
+      draftConfig.chunksPerAxis = value;
+      syncDraftWorldBounds();
+    })
+  );
+  panel.appendChild(
+    createSlider("Chunk Size", 64, 256, 16, draftConfig.chunkSize, (value) => {
+      draftConfig.chunkSize = value;
+      syncDraftWorldBounds();
+    })
+  );
+  panel.appendChild(createInfoRow("World Size", String(draftConfig.worldSize)));
   panel.appendChild(
     createSlider("Base Height", -64, 32, 1, draftConfig.baseHeight, (value) => {
       draftConfig.baseHeight = value;
@@ -808,7 +837,7 @@ function createPresetControls(): HTMLElement {
     if (preset.featureState) {
       draftConfig.poiDebug = clonePoiDebugConfig(preset.featureState.poiDebug);
     }
-    applyDraftToWorld();
+    return applyDraftToWorld();
   });
 
   const save = createButton("Save Current", () => {
@@ -938,7 +967,7 @@ function createActionButtons(): HTMLElement {
 
   wrap.appendChild(
     createButton("Rebuild Terrain", () => {
-      applyDraftToWorld();
+      return applyDraftToWorld();
     })
   );
   wrap.appendChild(
@@ -976,12 +1005,35 @@ function createFeatureBuildStatus(): HTMLElement {
   row.style.border = "1px solid rgba(255,255,255,0.1)";
   row.style.color = "#9cb3c3";
   row.style.whiteSpace = "pre-wrap";
-  row.textContent = draftConfig.features.poi
+  featureBuildStatusText = row;
+  updateFeatureBuildStatus();
+  return row;
+}
+
+function updateFeatureBuildStatus(): void {
+  if (!featureBuildStatusText) {
+    return;
+  }
+
+  const summary = draftConfig.features.poi
     ? draftConfig.features.roads
       ? "POI and roads will rebuild into the world."
       : "POI will load on rebuild. Roads remain disabled."
     : "POI and roads are excluded by default.";
-  return row;
+  const workerLine = workerStatus.workersEnabled
+    ? workerStatus.sharedSnapshotsEnabled
+      ? "Workers active. Shared snapshots enabled."
+      : "Workers active. Shared snapshots unavailable."
+    : "Workers unavailable. Main-thread fallback only.";
+  const workerDetail =
+    `crossOriginIsolated: ${workerStatus.crossOriginIsolated}\n` +
+    `SharedArrayBuffer: ${workerStatus.sharedArrayBufferDefined}\n` +
+    `Snapshot Mode: ${workerStatus.snapshotMode}`;
+  const progress =
+    buildStatus.phase === "idle"
+      ? ""
+      : `\n${buildStatus.message}`;
+  featureBuildStatusText.textContent = `${summary}\n${workerLine}\n${workerDetail}${progress}`;
 }
 
 function createPoiDebugControls(): HTMLElement {
@@ -1083,8 +1135,8 @@ function createWaterDebugControl(): HTMLElement {
   return row;
 }
 
-function applyDraftToWorld(): void {
-  demo.rebuildTerrain(buildTerrainOverridesFromDraft());
+async function applyDraftToWorld(): Promise<void> {
+  await demo.rebuildTerrain(buildTerrainOverridesFromDraft());
   demo.setCollisionRadius(draftConfig.collisionRadius);
   demo.setFoliageRadius(draftConfig.foliageRadius);
   demo.setShowFoliage(draftConfig.showFoliage);
@@ -1100,6 +1152,12 @@ function applyDraftToWorld(): void {
   draftConfig = buildDraftConfig();
   renderPanel();
   renderFeaturePanel();
+}
+
+function runAsyncTask(task: Promise<void>): void {
+  void task.catch((error: unknown) => {
+    console.error(error);
+  });
 }
 
 function applyDraftMaterialConfig(): void {
@@ -1135,6 +1193,11 @@ function buildDraftConfig(): DraftConfig {
   return {
     seed: String(config.seed),
     useGeneratedTextures: demo.getUseGeneratedTextures(),
+    worldMin: config.worldMin,
+    worldMax: config.worldMax,
+    worldSize: config.worldSize,
+    chunksPerAxis: config.chunksPerAxis,
+    chunkSize: config.chunkSize,
     baseHeight: config.baseHeight,
     maxHeight: config.maxHeight,
     waterLevel: demo.getWaterLevel(),
@@ -1169,6 +1232,10 @@ function buildDraftConfig(): DraftConfig {
 function buildTerrainOverridesFromDraft(): TerrainConfigOverrides {
   return {
     seed: draftConfig.seed,
+    worldMin: draftConfig.worldMin,
+    worldMax: draftConfig.worldMax,
+    chunksPerAxis: draftConfig.chunksPerAxis,
+    chunkSize: draftConfig.chunkSize,
     baseHeight: draftConfig.baseHeight,
     maxHeight: draftConfig.maxHeight,
     waterLevel: draftConfig.waterLevel,
@@ -1190,6 +1257,13 @@ function mergeDraftWithOverrides(
   return {
     seed: String(overrides.seed ?? base.seed),
     useGeneratedTextures: base.useGeneratedTextures,
+    worldMin: overrides.worldMin ?? base.worldMin,
+    worldMax: overrides.worldMax ?? base.worldMax,
+    worldSize:
+      (overrides.worldMax ?? base.worldMax) -
+      (overrides.worldMin ?? base.worldMin),
+    chunksPerAxis: overrides.chunksPerAxis ?? base.chunksPerAxis,
+    chunkSize: overrides.chunkSize ?? base.chunkSize,
     baseHeight: overrides.baseHeight ?? base.baseHeight,
     maxHeight: overrides.maxHeight ?? base.maxHeight,
     waterLevel: overrides.waterLevel ?? base.waterLevel,
@@ -1301,7 +1375,22 @@ function createDivider(): HTMLElement {
   return el;
 }
 
-function createButton(label: string, onClick: () => void): HTMLButtonElement {
+function createInfoRow(label: string, value: string): HTMLElement {
+  const el = document.createElement("div");
+  el.style.marginTop = "8px";
+  el.style.padding = "6px 8px";
+  el.style.borderRadius = "8px";
+  el.style.background = "rgba(14, 21, 29, 0.95)";
+  el.style.border = "1px solid rgba(255,255,255,0.1)";
+  el.style.color = "#9cb3c3";
+  el.textContent = `${label}: ${value}`;
+  return el;
+}
+
+function createButton(
+  label: string,
+  onClick: () => void | Promise<void>
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = label;
@@ -1315,7 +1404,9 @@ function createButton(label: string, onClick: () => void): HTMLButtonElement {
   button.style.maxWidth = "100%";
   button.style.minWidth = "0";
   button.style.boxSizing = "border-box";
-  button.addEventListener("click", onClick);
+  button.addEventListener("click", () => {
+    runAsyncTask(Promise.resolve(onClick()));
+  });
   return button;
 }
 
@@ -1439,6 +1530,11 @@ function getDecimalPlaces(step: number): number {
 interface DraftConfig {
   seed: string;
   useGeneratedTextures: boolean;
+  worldMin: number;
+  worldMax: number;
+  worldSize: number;
+  chunksPerAxis: number;
+  chunkSize: number;
   baseHeight: number;
   maxHeight: number;
   waterLevel: number;
@@ -1510,4 +1606,10 @@ function clampErosionResolution(value: number): number {
   const rounded = Math.round(value);
   const clamped = Math.max(65, Math.min(513, rounded));
   return clamped % 2 === 0 ? clamped + 1 : clamped;
+}
+
+function syncDraftWorldBounds(): void {
+  draftConfig.worldSize = draftConfig.chunksPerAxis * draftConfig.chunkSize;
+  draftConfig.worldMin = -draftConfig.worldSize * 0.5;
+  draftConfig.worldMax = draftConfig.worldSize * 0.5;
 }

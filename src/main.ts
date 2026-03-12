@@ -3,10 +3,20 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { TerrainConfig, TerrainConfigOverrides } from "./terrain/TerrainConfig";
+import {
+  mergeTerrainConfig,
+  TerrainConfig,
+  TerrainConfigOverrides
+} from "./terrain/TerrainConfig";
+import {
+  TerrainBuildCoordinator
+} from "./terrain/TerrainBuildCoordinator";
+import {
+  TerrainChunkBuildCoordinator
+} from "./terrain/TerrainChunkBuildCoordinator";
 import { TerrainPoi } from "./terrain/TerrainPoiPlanner";
 import { TerrainRoad } from "./terrain/TerrainRoadPlanner";
-import { TerrainSystem } from "./terrain/TerrainSystem";
+import { TerrainSystem, TerrainSystemBuildOptions } from "./terrain/TerrainSystem";
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
 import { TerrainPoiDebugConfig, TerrainPoiStats } from "./terrain/TerrainPoiSystem";
 import { TerrainRoadStats } from "./terrain/TerrainRoadSystem";
@@ -47,9 +57,9 @@ export interface TerrainDemo {
   readonly getTerrainMaterialConfig: () => TerrainMaterialConfig;
   readonly setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) => void;
   readonly getTerrainMaterialThresholds: () => TerrainLayerThresholds;
-  readonly setUseGeneratedTextures: (enabled: boolean) => void;
+  readonly setUseGeneratedTextures: (enabled: boolean) => Promise<void>;
   readonly getUseGeneratedTextures: () => boolean;
-  readonly rebuildTerrain: (overrides: TerrainConfigOverrides) => void;
+  readonly rebuildTerrain: (overrides: TerrainConfigOverrides) => Promise<void>;
   readonly getTerrainConfig: () => TerrainConfig;
   readonly getFoliageStats: () => TerrainFoliageStats;
   readonly getPoiSites: () => readonly TerrainPoi[];
@@ -58,6 +68,26 @@ export interface TerrainDemo {
   readonly getPoiDebugConfig: () => TerrainPoiDebugConfig;
   readonly getRoads: () => readonly TerrainRoad[];
   readonly getRoadStats: () => TerrainRoadStats;
+  readonly getBuildStatus: () => TerrainBuildStatus;
+  readonly subscribeBuildStatus: (
+    listener: (status: TerrainBuildStatus) => void
+  ) => () => void;
+  readonly getWorkerStatus: () => TerrainWorkerStatus;
+}
+
+export interface TerrainBuildStatus {
+  readonly phase: "idle" | "world" | "chunks" | "error";
+  readonly message: string;
+  readonly completed: number;
+  readonly total: number;
+}
+
+export interface TerrainWorkerStatus {
+  readonly workersEnabled: boolean;
+  readonly sharedSnapshotsEnabled: boolean;
+  readonly crossOriginIsolated: boolean;
+  readonly sharedArrayBufferDefined: boolean;
+  readonly snapshotMode: "shared" | "copied" | "main-thread";
 }
 
 export function createTerrainDemo(
@@ -83,9 +113,76 @@ export function createTerrainDemo(
 
   const light = new HemisphericLight("terrain-light", new Vector3(0.4, 1, 0.2), scene);
   light.intensity = 0.95;
+  const workersEnabled = typeof Worker !== "undefined";
+  const crossOriginIsolated = globalThis.crossOriginIsolated === true;
+  const sharedArrayBufferDefined = typeof SharedArrayBuffer !== "undefined";
+  const sharedSnapshotsEnabled =
+    sharedArrayBufferDefined && crossOriginIsolated;
+  const buildCoordinator = new TerrainBuildCoordinator(sharedSnapshotsEnabled);
+  const chunkBuildCoordinator = new TerrainChunkBuildCoordinator();
+  let buildVersion = 0;
+  let buildStatus: TerrainBuildStatus = {
+    phase: "idle",
+    message: "",
+    completed: 0,
+    total: 0
+  };
+  const buildStatusListeners = new Set<(status: TerrainBuildStatus) => void>();
 
-  let terrainSystem = new TerrainSystem(scene, overrides, textureOptions);
+  const setBuildStatus = (status: TerrainBuildStatus): void => {
+    buildStatus = status;
+    buildStatusListeners.forEach((listener) => listener(status));
+  };
+
+  const createBuildOptions = (version: number): TerrainSystemBuildOptions => ({
+    chunkBuildCoordinator,
+    chunkBuildVersion: version,
+    onChunkBuildProgress: (progress) => {
+      if (version !== buildVersion) {
+        return;
+      }
+
+      setBuildStatus({
+        phase: "chunks",
+        message: `Building chunks ${progress.completedChunks}/${progress.totalChunks}`,
+        completed: progress.completedChunks,
+        total: progress.totalChunks
+      });
+    }
+  });
+
+  let terrainSystem = new TerrainSystem(
+    scene,
+    overrides,
+    textureOptions,
+    null,
+    createBuildOptions(buildVersion)
+  );
+  frameCameraToWorld(camera, terrainSystem.getConfig());
   terrainSystem.initialize();
+  void terrainSystem
+    .whenChunkMeshesReady()
+    .then(() => {
+      if (buildVersion === 0) {
+        setBuildStatus({
+          phase: "idle",
+          message: "",
+          completed: 0,
+          total: 0
+        });
+      }
+    })
+    .catch((error) => {
+      console.error(error);
+      if (buildVersion === 0) {
+        setBuildStatus({
+          phase: "error",
+          message: error instanceof Error ? error.message : String(error),
+          completed: 0,
+          total: 0
+        });
+      }
+    });
   terrainSystem.update(camera.position);
 
   scene.onBeforeRenderObservable.add(() => {
@@ -100,6 +197,108 @@ export function createTerrainDemo(
   window.addEventListener("resize", () => {
     engine.resize();
   });
+  window.addEventListener("beforeunload", () => {
+    buildCoordinator.dispose();
+    chunkBuildCoordinator.dispose();
+  });
+
+  const replaceTerrainSystem = async (
+    nextConfigOverrides: TerrainConfigOverrides,
+    nextTextureOptions: TerrainTextureOptions
+  ): Promise<void> => {
+    const wireframe = terrainSystem.getWireframe();
+    const debugViewMode = terrainSystem.getDebugViewMode();
+    const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
+    const waterLevel = terrainSystem.getWaterLevel();
+    const waterConfig = terrainSystem.getWaterConfig();
+    const collisionRadius = terrainSystem.getCollisionRadius();
+    const foliageRadius = terrainSystem.getFoliageRadius();
+    const showFoliage = terrainSystem.getShowFoliage();
+    const showPoi = terrainSystem.getShowPoi();
+    const poiDebugConfig = terrainSystem.getPoiDebugConfig();
+    const showRoads = terrainSystem.getShowRoads();
+    const lodDistances = terrainSystem.getLodDistances();
+    const currentConfig = terrainSystem.getConfig();
+    const mergedOverrides: TerrainConfigOverrides = {
+      ...currentConfig,
+      ...nextConfigOverrides,
+      erosion: {
+        ...currentConfig.erosion,
+        ...nextConfigOverrides.erosion
+      },
+      features: {
+        ...currentConfig.features,
+        ...nextConfigOverrides.features
+      },
+      poi: {
+        ...currentConfig.poi,
+        ...nextConfigOverrides.poi
+      },
+      rivers: {
+        ...currentConfig.rivers,
+        ...nextConfigOverrides.rivers
+      },
+      shape: {
+        ...currentConfig.shape,
+        ...nextConfigOverrides.shape
+      }
+    };
+    const nextConfig = mergeTerrainConfig(mergedOverrides);
+    const nextBuildVersion = ++buildVersion;
+    setBuildStatus({
+      phase: "world",
+      message: nextConfig.features.poi
+        ? "Building world features"
+        : "Preparing terrain rebuild",
+      completed: 0,
+      total: 1
+    });
+    const prebuiltWorld = await buildCoordinator.buildWorld(
+      nextConfig,
+      nextBuildVersion
+    );
+    if (nextBuildVersion !== buildVersion) {
+      return;
+    }
+
+    terrainSystem.dispose();
+    terrainSystem = new TerrainSystem(
+      scene,
+      nextConfig,
+      nextTextureOptions,
+      prebuiltWorld,
+      createBuildOptions(nextBuildVersion)
+    );
+    frameCameraToWorld(camera, nextConfig);
+    terrainSystem.initialize();
+    terrainSystem.setWireframe(wireframe);
+    terrainSystem.setCollisionRadius(
+      nextConfigOverrides.collisionRadius ?? collisionRadius
+    );
+    terrainSystem.setFoliageRadius(
+      nextConfigOverrides.foliageRadius ?? foliageRadius
+    );
+    terrainSystem.setShowFoliage(showFoliage);
+    terrainSystem.setShowPoi(showPoi);
+    terrainSystem.setPoiDebugConfig(poiDebugConfig);
+    terrainSystem.setShowRoads(showRoads);
+    terrainSystem.setLodDistances(nextConfigOverrides.lodDistances ?? lodDistances);
+    terrainSystem.setWaterLevel(nextConfigOverrides.waterLevel ?? waterLevel);
+    terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
+    terrainSystem.setWaterConfig(waterConfig);
+    terrainSystem.setDebugViewMode(debugViewMode);
+    terrainSystem.update(camera.position);
+    await terrainSystem.whenChunkMeshesReady();
+    if (nextBuildVersion !== buildVersion) {
+      return;
+    }
+    setBuildStatus({
+      phase: "idle",
+      message: "",
+      completed: 0,
+      total: 0
+    });
+  };
 
   return {
     engine,
@@ -134,102 +333,16 @@ export function createTerrainDemo(
     setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) =>
       terrainSystem.setTerrainMaterialThresholds(thresholds),
     getTerrainMaterialThresholds: () => terrainSystem.getTerrainMaterialThresholds(),
-    setUseGeneratedTextures: (enabled: boolean) => {
+    setUseGeneratedTextures: async (enabled: boolean) => {
       const nextTextureOptions = {
         ...terrainSystem.getTextureOptions(),
         useGeneratedTextures: enabled
       };
-      const wireframe = terrainSystem.getWireframe();
-      const debugViewMode = terrainSystem.getDebugViewMode();
-      const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
-      const waterLevel = terrainSystem.getWaterLevel();
-      const waterConfig = terrainSystem.getWaterConfig();
-      const collisionRadius = terrainSystem.getCollisionRadius();
-      const foliageRadius = terrainSystem.getFoliageRadius();
-      const showFoliage = terrainSystem.getShowFoliage();
-      const showPoi = terrainSystem.getShowPoi();
-      const poiDebugConfig = terrainSystem.getPoiDebugConfig();
-      const showRoads = terrainSystem.getShowRoads();
-      const lodDistances = terrainSystem.getLodDistances();
-      const config = terrainSystem.getConfig();
-      terrainSystem.dispose();
-      terrainSystem = new TerrainSystem(scene, config, nextTextureOptions);
-      terrainSystem.initialize();
-      terrainSystem.setWireframe(wireframe);
-      terrainSystem.setCollisionRadius(collisionRadius);
-      terrainSystem.setFoliageRadius(foliageRadius);
-      terrainSystem.setShowFoliage(showFoliage);
-      terrainSystem.setShowPoi(showPoi);
-      terrainSystem.setPoiDebugConfig(poiDebugConfig);
-      terrainSystem.setShowRoads(showRoads);
-      terrainSystem.setLodDistances(lodDistances);
-      terrainSystem.setWaterLevel(waterLevel);
-      terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
-      terrainSystem.setWaterConfig(waterConfig);
-      terrainSystem.setDebugViewMode(debugViewMode);
-      terrainSystem.update(camera.position);
+      await replaceTerrainSystem(terrainSystem.getConfig(), nextTextureOptions);
     },
     getUseGeneratedTextures: () => terrainSystem.getTextureOptions().useGeneratedTextures,
-    rebuildTerrain: (nextOverrides: TerrainConfigOverrides) => {
-      const wireframe = terrainSystem.getWireframe();
-      const debugViewMode = terrainSystem.getDebugViewMode();
-      const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
-      const waterLevel = terrainSystem.getWaterLevel();
-      const waterConfig = terrainSystem.getWaterConfig();
-      const collisionRadius = terrainSystem.getCollisionRadius();
-      const foliageRadius = terrainSystem.getFoliageRadius();
-      const showFoliage = terrainSystem.getShowFoliage();
-      const showPoi = terrainSystem.getShowPoi();
-      const poiDebugConfig = terrainSystem.getPoiDebugConfig();
-      const showRoads = terrainSystem.getShowRoads();
-      const lodDistances = terrainSystem.getLodDistances();
-      const currentTextureOptions = terrainSystem.getTextureOptions();
-      const config = terrainSystem.getConfig();
-      const mergedOverrides: TerrainConfigOverrides = {
-        ...config,
-        ...nextOverrides,
-        erosion: {
-          ...config.erosion,
-          ...nextOverrides.erosion
-        },
-        features: {
-          ...config.features,
-          ...nextOverrides.features
-        },
-        poi: {
-          ...config.poi,
-          ...nextOverrides.poi
-        },
-        rivers: {
-          ...config.rivers,
-          ...nextOverrides.rivers
-        },
-        shape: {
-          ...config.shape,
-          ...nextOverrides.shape
-        }
-      };
-      terrainSystem.dispose();
-      terrainSystem = new TerrainSystem(scene, mergedOverrides, currentTextureOptions);
-      terrainSystem.initialize();
-      terrainSystem.setWireframe(wireframe);
-      terrainSystem.setCollisionRadius(
-        nextOverrides.collisionRadius ?? collisionRadius
-      );
-      terrainSystem.setFoliageRadius(
-        nextOverrides.foliageRadius ?? foliageRadius
-      );
-      terrainSystem.setShowFoliage(showFoliage);
-      terrainSystem.setShowPoi(showPoi);
-      terrainSystem.setPoiDebugConfig(poiDebugConfig);
-      terrainSystem.setShowRoads(showRoads);
-      terrainSystem.setLodDistances(nextOverrides.lodDistances ?? lodDistances);
-      terrainSystem.setWaterLevel(nextOverrides.waterLevel ?? waterLevel);
-      terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
-      terrainSystem.setWaterConfig(waterConfig);
-      terrainSystem.setDebugViewMode(debugViewMode);
-      terrainSystem.update(camera.position);
-    },
+    rebuildTerrain: (nextOverrides: TerrainConfigOverrides) =>
+      replaceTerrainSystem(nextOverrides, terrainSystem.getTextureOptions()),
     getTerrainConfig: () => terrainSystem.getConfig(),
     getFoliageStats: () => terrainSystem.getFoliageStats(),
     getPoiSites: () => terrainSystem.getPoiSites(),
@@ -238,8 +351,38 @@ export function createTerrainDemo(
       terrainSystem.setPoiDebugConfig(config),
     getPoiDebugConfig: () => terrainSystem.getPoiDebugConfig(),
     getRoads: () => terrainSystem.getRoads(),
-    getRoadStats: () => terrainSystem.getRoadStats()
+    getRoadStats: () => terrainSystem.getRoadStats(),
+    getBuildStatus: () => buildStatus,
+    subscribeBuildStatus: (listener) => {
+      buildStatusListeners.add(listener);
+      listener(buildStatus);
+      return () => {
+        buildStatusListeners.delete(listener);
+      };
+    },
+    getWorkerStatus: () => ({
+      workersEnabled,
+      sharedSnapshotsEnabled,
+      crossOriginIsolated,
+      sharedArrayBufferDefined,
+      snapshotMode: !workersEnabled
+        ? "main-thread"
+        : sharedSnapshotsEnabled
+          ? "shared"
+          : "copied"
+    })
   };
+}
+
+function frameCameraToWorld(
+  camera: ArcRotateCamera,
+  config: TerrainConfig
+): void {
+  const baseRadius = Math.max(config.worldSize * 1.15, 240);
+  camera.lowerRadiusLimit = Math.max(config.chunkSize * 0.75, 120);
+  camera.upperRadiusLimit = Math.max(config.worldSize * 2.4, baseRadius + 200);
+  camera.target = new Vector3(0, Math.max(config.baseHeight + 50, 24), 0);
+  camera.radius = Math.max(camera.radius, baseRadius);
 }
 
 export * from "./terrain";

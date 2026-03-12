@@ -191,17 +191,24 @@ export function mergeTerrainConfig(
     ...DEFAULT_TERRAIN_SHAPE_CONFIG,
     ...overrides.shape
   });
+  const expectedWorldSize = chunksPerAxis * chunkSize;
 
-  if (worldSize !== 1024) {
-    throw new Error(`Expected a 1024-unit world, received ${worldSize}.`);
+  if (worldSize !== expectedWorldSize) {
+    throw new Error(
+      `Expected world size ${expectedWorldSize} from ${chunksPerAxis} chunks at size ${chunkSize}, received ${worldSize}.`
+    );
   }
 
-  if (chunksPerAxis !== 8) {
-    throw new Error(`Expected 8 chunks per axis, received ${chunksPerAxis}.`);
+  if (chunksPerAxis < 2 || !Number.isInteger(chunksPerAxis)) {
+    throw new Error(`Expected an integer chunksPerAxis >= 2, received ${chunksPerAxis}.`);
   }
 
-  if (chunkSize !== 128) {
-    throw new Error(`Expected a chunk size of 128, received ${chunkSize}.`);
+  if (chunkSize < 32) {
+    throw new Error(`Expected a chunk size >= 32, received ${chunkSize}.`);
+  }
+
+  if (worldMin >= worldMax) {
+    throw new Error(`Expected worldMin < worldMax, received ${worldMin} and ${worldMax}.`);
   }
 
   return Object.freeze({

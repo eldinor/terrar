@@ -20,7 +20,8 @@ export class TerrainRoadSystem {
   constructor(
     private readonly scene: Scene,
     private readonly planner: TerrainRoadPlanner,
-    private readonly config: TerrainConfig
+    private readonly config: TerrainConfig,
+    private readonly prebuiltRoads: readonly TerrainRoad[] = []
   ) {
     this.roadMaskTexture = new DynamicTexture(
       "terrain-road-mask",
@@ -37,7 +38,10 @@ export class TerrainRoadSystem {
       return;
     }
 
-    this.roads = this.planner.generateRoads(pois);
+    this.roads =
+      this.prebuiltRoads.length > 0
+        ? [...this.prebuiltRoads]
+        : this.planner.generateRoads(pois);
     this.redrawRoadMask();
   }
 

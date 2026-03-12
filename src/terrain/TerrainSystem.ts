@@ -11,6 +11,11 @@ import {
   TerrainLODLevel
 } from "./TerrainConfig";
 import { TerrainChunk } from "./TerrainChunk";
+import {
+  TerrainChunkBuildCoordinator,
+  TerrainChunkBuildProgress
+} from "./TerrainChunkBuildCoordinator";
+import { packTerrainSnapshot } from "./TerrainSnapshotLayout";
 import { TerrainFoliageCandidate, TerrainFoliagePlanner } from "./TerrainFoliagePlanner";
 import { TerrainFoliageStats, TerrainFoliageSystem } from "./TerrainFoliageSystem";
 import { TerrainLODController } from "./TerrainLODController";
@@ -25,6 +30,7 @@ import {
 import { TerrainRoad, TerrainRoadPlanner } from "./TerrainRoadPlanner";
 import { TerrainRoadStats, TerrainRoadSystem } from "./TerrainRoadSystem";
 import { TerrainWaterConfig, TerrainWaterSystem } from "./TerrainWaterSystem";
+import { TerrainPrebuiltWorldData } from "./TerrainBuildCoordinator";
 import type { TerrainDebugOverlay } from "./TerrainDebugOverlay";
 import {
   cloneTerrainMaterialConfig,
@@ -66,17 +72,24 @@ export class TerrainSystem {
   private readonly textureOptions: Required<TerrainTextureOptions>;
   private elapsedTimeSeconds = 0;
   private initialized = false;
+  private disposed = false;
+  private chunkBuildPromise: Promise<void> | null = null;
 
   constructor(
     private readonly scene: Scene,
     overrides: TerrainConfigOverrides = {},
-    textureOptions: TerrainTextureOptions = {}
+    textureOptions: TerrainTextureOptions = {},
+    private readonly prebuiltWorld: TerrainPrebuiltWorldData | null = null,
+    private readonly buildOptions: TerrainSystemBuildOptions = {}
   ) {
     this.config = mergeTerrainConfig({
       ...DEFAULT_TERRAIN_CONFIG,
       ...overrides
     });
-    this.generator = new ProceduralGenerator(this.config);
+    this.generator = new ProceduralGenerator(
+      this.config,
+      this.prebuiltWorld?.snapshot ?? null
+    );
     this.textureOptions = {
       useGeneratedTextures: true,
       maxTextureSize: 512,
@@ -92,14 +105,23 @@ export class TerrainSystem {
       ? new TerrainPoiPlanner(this.config, this.generator)
       : null;
     this.poiSystem = this.poiPlanner
-      ? new TerrainPoiSystem(this.scene, this.poiPlanner)
+      ? new TerrainPoiSystem(
+          this.scene,
+          this.poiPlanner,
+          this.prebuiltWorld?.poiSites ?? []
+        )
       : null;
     this.roadPlanner =
       this.config.features.poi && this.config.features.roads
         ? new TerrainRoadPlanner(this.config, this.generator)
         : null;
     this.roadSystem = this.roadPlanner
-      ? new TerrainRoadSystem(this.scene, this.roadPlanner, this.config)
+      ? new TerrainRoadSystem(
+          this.scene,
+          this.roadPlanner,
+          this.config,
+          this.prebuiltWorld?.roads ?? []
+        )
       : null;
     this.waterSystem = new TerrainWaterSystem(
       this.scene,
@@ -169,7 +191,6 @@ export class TerrainSystem {
           this.material,
           this.config
         );
-        chunk.initializeMeshes();
         row.push(chunk);
         this.chunks.push(chunk);
       }
@@ -180,6 +201,16 @@ export class TerrainSystem {
     this.initialized = true;
     this.foliageSystem.initialize(this.chunks);
     this.waterSystem.initialize();
+    if (this.buildOptions.chunkBuildCoordinator) {
+      this.chunkBuildPromise = this.buildChunkMeshesAsync(roads);
+    } else {
+      this.chunks.forEach((chunk) => chunk.initializeMeshes());
+      this.chunkBuildPromise = Promise.resolve();
+      this.buildOptions.onChunkBuildProgress?.({
+        completedChunks: this.chunks.length,
+        totalChunks: this.chunks.length
+      });
+    }
   }
 
   update(cameraPosition: Vector3): void {
@@ -225,6 +256,7 @@ export class TerrainSystem {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.debugOverlay?.dispose();
     this.debugOverlay = null;
     this.debugOverlayPromise = null;
@@ -240,7 +272,12 @@ export class TerrainSystem {
     this.materialConfig = null;
     this.debugViewMode = TerrainDebugViewMode.Final;
     this.elapsedTimeSeconds = 0;
+    this.chunkBuildPromise = null;
     this.initialized = false;
+  }
+
+  whenChunkMeshesReady(): Promise<void> {
+    return this.chunkBuildPromise ?? Promise.resolve();
   }
 
   async createDebugOverlay(): Promise<void> {
@@ -494,4 +531,67 @@ export class TerrainSystem {
 
     return 3;
   }
+
+  private async buildChunkMeshesAsync(roads: readonly TerrainRoad[]): Promise<void> {
+    const coordinator = this.buildOptions.chunkBuildCoordinator;
+    if (!coordinator || !this.material) {
+      return;
+    }
+
+    try {
+      await coordinator.buildChunks(
+        this.config,
+        roads,
+        this.prebuiltWorld?.packedSnapshot ?? packTerrainSnapshot(this.generator.createSnapshot()),
+        this.buildOptions.chunkBuildVersion ?? 0,
+        (chunkX, chunkZ, meshes) => {
+          if (this.disposed || !this.material) {
+            return;
+          }
+
+          const chunk = this.chunkGrid[chunkZ]?.[chunkX];
+          if (!chunk) {
+            return;
+          }
+
+          meshes.forEach((meshData, index) => {
+            const lod = index as TerrainLODLevel;
+            const mesh = TerrainMeshBuilder.buildChunkMeshFromData(
+              this.scene,
+              chunk.data,
+              lod,
+              this.material!,
+              meshData
+            );
+            chunk.setMesh(lod, mesh);
+          });
+        },
+        (progress) => {
+          if (this.disposed) {
+            return;
+          }
+          this.buildOptions.onChunkBuildProgress?.(progress);
+        }
+      );
+    } catch (error) {
+      console.error("Chunk worker build failed, falling back to main-thread mesh generation.", error);
+      if (this.disposed) {
+        return;
+      }
+
+      this.chunks.forEach((chunk, index) => {
+        chunk.initializeMeshes();
+        this.buildOptions.onChunkBuildProgress?.({
+          completedChunks: index + 1,
+          totalChunks: this.chunks.length
+        });
+      });
+    }
+  }
+}
+
+export interface TerrainSystemBuildOptions {
+  readonly chunkBuildCoordinator?: TerrainChunkBuildCoordinator | null;
+  readonly chunkBuildVersion?: number;
+  readonly onChunkBuildProgress?: (progress: TerrainChunkBuildProgress) => void;
 }

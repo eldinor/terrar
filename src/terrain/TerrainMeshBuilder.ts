@@ -13,6 +13,15 @@ import {
 } from "./materials";
 
 export class TerrainMeshBuilder {
+  static createChunkMeshData(
+    chunkData: TerrainChunkData,
+    lod: TerrainLODLevel,
+    config: TerrainConfig
+  ): TerrainChunkMeshData {
+    const grid = chunkData.getGrid(lod);
+    return this.createMeshData(chunkData, grid, config);
+  }
+
   static buildChunkMesh(
     scene: Scene,
     chunkData: TerrainChunkData,
@@ -20,18 +29,30 @@ export class TerrainMeshBuilder {
     material: ShaderMaterial,
     config: TerrainConfig
   ): Mesh {
-    const grid = chunkData.getGrid(lod);
     const mesh = new Mesh(
       `terrain-${chunkData.chunkX}-${chunkData.chunkZ}-lod${lod}`,
       scene
     );
-    const vertexData = this.createVertexData(chunkData, grid, config);
-    vertexData.applyToMesh(mesh, true);
-    mesh.material = material;
-    mesh.isPickable = false;
-    mesh.doNotSyncBoundingInfo = false;
-    mesh.freezeWorldMatrix();
-    mesh.setEnabled(false);
+    this.applyMeshData(
+      mesh,
+      this.createChunkMeshData(chunkData, lod, config),
+      material
+    );
+    return mesh;
+  }
+
+  static buildChunkMeshFromData(
+    scene: Scene,
+    chunkData: TerrainChunkData,
+    lod: TerrainLODLevel,
+    material: ShaderMaterial,
+    meshData: TerrainChunkMeshData
+  ): Mesh {
+    const mesh = new Mesh(
+      `terrain-${chunkData.chunkX}-${chunkData.chunkZ}-lod${lod}`,
+      scene
+    );
+    this.applyMeshData(mesh, meshData, material);
     return mesh;
   }
 
@@ -51,11 +72,31 @@ export class TerrainMeshBuilder {
     );
   }
 
-  private static createVertexData(
+  private static applyMeshData(
+    mesh: Mesh,
+    meshData: TerrainChunkMeshData,
+    material: ShaderMaterial
+  ): void {
+    const vertexData = new VertexData();
+    vertexData.positions = Array.from(meshData.positions);
+    vertexData.indices = Array.from(meshData.indices);
+    vertexData.normals = Array.from(meshData.normals);
+    vertexData.uvs = Array.from(meshData.uvs);
+    vertexData.uvs2 = Array.from(meshData.uvs2);
+    vertexData.colors = Array.from(meshData.colors);
+    vertexData.applyToMesh(mesh, true);
+    mesh.material = material;
+    mesh.isPickable = false;
+    mesh.doNotSyncBoundingInfo = false;
+    mesh.freezeWorldMatrix();
+    mesh.setEnabled(false);
+  }
+
+  private static createMeshData(
     chunkData: TerrainChunkData,
     grid: TerrainSampleGrid,
     config: TerrainConfig
-  ): VertexData {
+  ): TerrainChunkMeshData {
     const positions: number[] = [];
     const indices: number[] = [];
     const uvs: number[] = [];
@@ -161,15 +202,24 @@ export class TerrainMeshBuilder {
       "east"
     );
 
-    const vertexData = new VertexData();
-    vertexData.positions = positions;
-    vertexData.indices = indices;
-    vertexData.normals = normals;
-    vertexData.uvs = uvs;
-    vertexData.uvs2 = uvs2;
-    vertexData.colors = colors;
-    return vertexData;
+    return {
+      positions: new Float32Array(positions),
+      indices: new Uint32Array(indices),
+      normals: new Float32Array(normals),
+      uvs: new Float32Array(uvs),
+      uvs2: new Float32Array(uvs2),
+      colors: new Float32Array(colors)
+    };
   }
+}
+
+export interface TerrainChunkMeshData {
+  readonly positions: Float32Array;
+  readonly indices: Uint32Array;
+  readonly normals: Float32Array;
+  readonly uvs: Float32Array;
+  readonly uvs2: Float32Array;
+  readonly colors: Float32Array;
 }
 
 type Edge = "north" | "south" | "west" | "east";

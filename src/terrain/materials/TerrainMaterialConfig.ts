@@ -23,6 +23,8 @@ export interface TerrainMaterialConfig {
   scales: TerrainTextureScaleConfig;
   shorelineStartOffset: number;
   shorelineEndOffset: number;
+  sedimentStrength: number;
+  sedimentSandBias: number;
   blendSharpness: number;
   triplanarSharpness: number;
   normalStrength: number;
@@ -50,6 +52,8 @@ export const DEFAULT_TERRAIN_MATERIAL_CONFIG: TerrainMaterialConfig = Object.fre
   }),
   shorelineStartOffset: 1.5,
   shorelineEndOffset: 16,
+  sedimentStrength: 1,
+  sedimentSandBias: 0.4,
   blendSharpness: 1.2,
   triplanarSharpness: 4,
   normalStrength: 1,
@@ -77,7 +81,9 @@ export function createTerrainMaterialConfigForHeightRange(
       ...DEFAULT_TERRAIN_MATERIAL_CONFIG.scales
     },
     shorelineStartOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineStartOffset,
-    shorelineEndOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineEndOffset
+    shorelineEndOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineEndOffset,
+    sedimentStrength: DEFAULT_TERRAIN_MATERIAL_CONFIG.sedimentStrength,
+    sedimentSandBias: DEFAULT_TERRAIN_MATERIAL_CONFIG.sedimentSandBias
   };
 }
 
@@ -89,6 +95,8 @@ export function cloneTerrainMaterialConfig(
     scales: { ...config.scales },
     shorelineStartOffset: config.shorelineStartOffset,
     shorelineEndOffset: config.shorelineEndOffset,
+    sedimentStrength: config.sedimentStrength,
+    sedimentSandBias: config.sedimentSandBias,
     blendSharpness: config.blendSharpness,
     triplanarSharpness: config.triplanarSharpness,
     normalStrength: config.normalStrength,

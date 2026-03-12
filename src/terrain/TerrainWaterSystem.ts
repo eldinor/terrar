@@ -14,9 +14,6 @@ import { ProceduralGenerator } from "./ProceduralGenerator";
 const WATER_SHADER_NAME = "terrainWater";
 const WATER_SURFACE_OFFSET = 0.02;
 const WATER_MASK_RESOLUTION = 512;
-const RIVER_MESH_THRESHOLD = 0.22;
-const LAKE_MESH_THRESHOLD = 0.08;
-
 export interface TerrainWaterConfig {
   readonly opacity: number;
   readonly shoreFadeDistance: number;
@@ -28,6 +25,7 @@ export interface TerrainWaterConfig {
   readonly deepColor: string;
   readonly riverDischargeStrength: number;
   readonly riverMeshThreshold: number;
+  readonly riverMeshMinWidth: number;
   readonly lakeMeshThreshold: number;
   readonly inlandSmoothingPasses: number;
   readonly debugView: number;
@@ -44,6 +42,7 @@ export const DEFAULT_TERRAIN_WATER_CONFIG: TerrainWaterConfig = Object.freeze({
   deepColor: "#1D5D78",
   riverDischargeStrength: 1,
   riverMeshThreshold: 0.22,
+  riverMeshMinWidth: 5,
   lakeMeshThreshold: 0.08,
   inlandSmoothingPasses: 2,
   debugView: 0
@@ -111,6 +110,7 @@ export class TerrainWaterSystem {
     if (
       previousConfig.riverDischargeStrength !== this.waterConfig.riverDischargeStrength ||
       previousConfig.riverMeshThreshold !== this.waterConfig.riverMeshThreshold ||
+      previousConfig.riverMeshMinWidth !== this.waterConfig.riverMeshMinWidth ||
       previousConfig.lakeMeshThreshold !== this.waterConfig.lakeMeshThreshold ||
       previousConfig.inlandSmoothingPasses !== this.waterConfig.inlandSmoothingPasses
     ) {
@@ -178,14 +178,20 @@ export class TerrainWaterSystem {
         const corners = [
           inlandGrid[this.toGridIndex(x, z, resolution)],
           inlandGrid[this.toGridIndex(x + 1, z, resolution)],
-          inlandGrid[this.toGridIndex(x, z + 1, resolution)],
-          inlandGrid[this.toGridIndex(x + 1, z + 1, resolution)]
+          inlandGrid[this.toGridIndex(x + 1, z + 1, resolution)],
+          inlandGrid[this.toGridIndex(x, z + 1, resolution)]
         ] as const;
         const maxRiverMeshSignal = Math.max(
           corners[0].riverMeshSignal,
           corners[1].riverMeshSignal,
           corners[2].riverMeshSignal,
           corners[3].riverMeshSignal
+        );
+        const maxRiverWidth = Math.max(
+          corners[0].riverWidth,
+          corners[1].riverWidth,
+          corners[2].riverWidth,
+          corners[3].riverWidth
         );
         const maxInlandWater = Math.max(
           Math.max(corners[0].river, corners[0].lake),
@@ -195,7 +201,13 @@ export class TerrainWaterSystem {
         );
         const maxLakeSignal = Math.max(corners[0].lake, corners[1].lake, corners[2].lake, corners[3].lake);
 
-        if (kind === "river" && maxRiverMeshSignal <= this.waterConfig.riverMeshThreshold) {
+        if (
+          kind === "river" &&
+          (
+            maxRiverMeshSignal <= this.waterConfig.riverMeshThreshold ||
+            maxRiverWidth < this.waterConfig.riverMeshMinWidth
+          )
+        ) {
           continue;
         }
 
@@ -210,20 +222,32 @@ export class TerrainWaterSystem {
           continue;
         }
 
-        corners.forEach((corner) => {
+        const polygon =
+          kind === "lake"
+            ? clipInlandPolygon(
+                corners,
+                this.waterConfig.lakeMeshThreshold,
+                (vertex) => vertex.lake
+              )
+            : corners.slice();
+
+        if (polygon.length < 3) {
+          continue;
+        }
+
+        polygon.forEach((corner) => {
           positions.push(corner.x, corner.y, corner.z);
           uvs.push(corner.u, corner.v);
         });
 
-        indices.push(
-          vertexOffset,
-          vertexOffset + 2,
-          vertexOffset + 1,
-          vertexOffset + 1,
-          vertexOffset + 2,
-          vertexOffset + 3
-        );
-        vertexOffset += 4;
+        for (let triangle = 1; triangle < polygon.length - 1; triangle += 1) {
+          indices.push(
+            vertexOffset,
+            vertexOffset + triangle + 1,
+            vertexOffset + triangle
+          );
+        }
+        vertexOffset += polygon.length;
       }
     }
 
@@ -285,6 +309,12 @@ export class TerrainWaterSystem {
     const discharge = smoothStep(this.config.rivers.flowThreshold, 1, sample.flow);
     const dischargeStrength = this.waterConfig.riverDischargeStrength;
     const riverMeshSignal = sample.river * (0.72 + discharge * 0.85 * dischargeStrength);
+    const riverWidth = estimateRiverWidth(
+      sample.river,
+      discharge,
+      this.config.rivers.bankStrength,
+      dischargeStrength
+    );
     const lift =
       WATER_SURFACE_OFFSET +
       0.08 +
@@ -297,6 +327,7 @@ export class TerrainWaterSystem {
       river: sample.river,
       lake: sample.lake,
       riverMeshSignal,
+      riverWidth,
       u: gridX / Math.max(1, resolution - 1),
       v: gridZ / Math.max(1, resolution - 1)
     };
@@ -497,8 +528,74 @@ interface InlandWaterVertex {
   river: number;
   lake: number;
   riverMeshSignal: number;
+  riverWidth: number;
   u: number;
   v: number;
+}
+
+function clipInlandPolygon(
+  corners: readonly InlandWaterVertex[],
+  threshold: number,
+  signal: (vertex: InlandWaterVertex) => number
+): InlandWaterVertex[] {
+  const polygon: InlandWaterVertex[] = [];
+
+  for (let index = 0; index < corners.length; index += 1) {
+    const current = corners[index];
+    const previous = corners[(index + corners.length - 1) % corners.length];
+    const currentInside = isInsideThreshold(current, threshold, signal);
+    const previousInside = isInsideThreshold(previous, threshold, signal);
+
+    if (currentInside) {
+      if (!previousInside) {
+        polygon.push(interpolateThresholdVertex(previous, current, threshold, signal));
+      }
+      polygon.push(current);
+    } else if (previousInside) {
+      polygon.push(interpolateThresholdVertex(previous, current, threshold, signal));
+    }
+  }
+
+  return polygon;
+}
+
+function isInsideThreshold(
+  vertex: InlandWaterVertex,
+  threshold: number,
+  signal: (vertex: InlandWaterVertex) => number
+): boolean {
+  return signal(vertex) >= threshold;
+}
+
+function interpolateThresholdVertex(
+  start: InlandWaterVertex,
+  end: InlandWaterVertex,
+  threshold: number,
+  signal: (vertex: InlandWaterVertex) => number
+): InlandWaterVertex {
+  const startValue = signal(start);
+  const endValue = signal(end);
+  const denominator = endValue - startValue;
+  const t =
+    Math.abs(denominator) < 0.0001
+      ? 0.5
+      : Math.max(0, Math.min(1, (threshold - startValue) / denominator));
+
+  return {
+    x: lerp(start.x, end.x, t),
+    y: lerp(start.y, end.y, t),
+    z: lerp(start.z, end.z, t),
+    river: lerp(start.river, end.river, t),
+    lake: lerp(start.lake, end.lake, t),
+    riverMeshSignal: lerp(start.riverMeshSignal, end.riverMeshSignal, t),
+    riverWidth: lerp(start.riverWidth, end.riverWidth, t),
+    u: lerp(start.u, end.u, t),
+    v: lerp(start.v, end.v, t)
+  };
+}
+
+function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t;
 }
 
 function smoothInlandWaterGrid(
@@ -523,6 +620,7 @@ function smoothInlandWaterGrid(
     const nextRiver = new Float32Array(vertices.length);
     const nextLake = new Float32Array(vertices.length);
     const nextRiverMeshSignal = new Float32Array(vertices.length);
+    const nextRiverWidth = new Float32Array(vertices.length);
 
     for (let z = 0; z < resolution; z += 1) {
       for (let x = 0; x < resolution; x += 1) {
@@ -532,6 +630,7 @@ function smoothInlandWaterGrid(
         let totalRiver = 0;
         let totalLake = 0;
         let totalRiverMeshSignal = 0;
+        let totalRiverWidth = 0;
 
         offsets.forEach(([offsetX, offsetZ]) => {
           const nx = x + offsetX;
@@ -547,6 +646,7 @@ function smoothInlandWaterGrid(
           totalRiver += neighbor.river * weight;
           totalLake += neighbor.lake * weight;
           totalRiverMeshSignal += neighbor.riverMeshSignal * weight;
+          totalRiverWidth += neighbor.riverWidth * weight;
         });
 
         nextHeights[index] = totalHeight / Math.max(totalWeight, 0.0001);
@@ -554,6 +654,7 @@ function smoothInlandWaterGrid(
         nextLake[index] = totalLake / Math.max(totalWeight, 0.0001);
         nextRiverMeshSignal[index] =
           totalRiverMeshSignal / Math.max(totalWeight, 0.0001);
+        nextRiverWidth[index] = totalRiverWidth / Math.max(totalWeight, 0.0001);
       }
     }
 
@@ -562,8 +663,20 @@ function smoothInlandWaterGrid(
       vertices[index].river = nextRiver[index];
       vertices[index].lake = nextLake[index];
       vertices[index].riverMeshSignal = nextRiverMeshSignal[index];
+      vertices[index].riverWidth = nextRiverWidth[index];
     }
   }
+}
+
+function estimateRiverWidth(
+  river: number,
+  discharge: number,
+  bankStrength: number,
+  dischargeStrength: number
+): number {
+  const signal = Math.max(river, discharge * 0.9);
+  const widthFactor = Math.max(0.15, bankStrength) * 0.8 + dischargeStrength * 0.35;
+  return 1.5 + signal * 10.5 * widthFactor;
 }
 
 function registerWaterShaders(): void {

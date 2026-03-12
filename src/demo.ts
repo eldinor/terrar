@@ -243,6 +243,12 @@ function renderRuntimeTab(): void {
     })
   );
   panel.appendChild(
+    createSlider("River Mesh Min Width", 0, 12, 0.5, draftConfig.water.riverMeshMinWidth, (value) => {
+      draftConfig.water.riverMeshMinWidth = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
     createSlider("Lake Mesh Cutoff", 0.02, 0.3, 0.01, draftConfig.water.lakeMeshThreshold, (value) => {
       draftConfig.water.lakeMeshThreshold = value;
       applyDraftWaterConfig();
@@ -445,6 +451,18 @@ function renderMaterialTab(): void {
   panel.appendChild(
     createSlider("Blend Sharpness", 0.5, 3, 0.05, draftConfig.blendSharpness, (value) => {
       draftConfig.blendSharpness = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Sediment", 0, 2, 0.05, draftConfig.sedimentStrength, (value) => {
+      draftConfig.sedimentStrength = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Sediment Sand", 0, 1, 0.05, draftConfig.sedimentSandBias, (value) => {
+      draftConfig.sedimentSandBias = value;
       applyDraftMaterialConfig();
     })
   );
@@ -744,7 +762,8 @@ function createDebugModeControl(): HTMLElement {
     ["Raw Height", TerrainDebugViewMode.RawHeight],
     ["Flow", TerrainDebugViewMode.Flow],
     ["River", TerrainDebugViewMode.River],
-    ["Lake", TerrainDebugViewMode.Lake]
+    ["Lake", TerrainDebugViewMode.Lake],
+    ["Sediment", TerrainDebugViewMode.Sediment]
   ];
 
   modes.forEach(([label, value]) => {
@@ -892,6 +911,8 @@ function applyDraftMaterialConfig(): void {
   config.blendSharpness = draftConfig.blendSharpness;
   config.shorelineStartOffset = draftConfig.shorelineStartOffset;
   config.shorelineEndOffset = draftConfig.shorelineEndOffset;
+  config.sedimentStrength = draftConfig.sedimentStrength;
+  config.sedimentSandBias = draftConfig.sedimentSandBias;
   demo.setTerrainMaterialConfig(config);
 }
 
@@ -916,6 +937,8 @@ function buildDraftConfig(): DraftConfig {
     blendSharpness: demo.getTerrainMaterialConfig().blendSharpness,
     shorelineStartOffset: demo.getTerrainMaterialConfig().shorelineStartOffset,
     shorelineEndOffset: demo.getTerrainMaterialConfig().shorelineEndOffset,
+    sedimentStrength: demo.getTerrainMaterialConfig().sedimentStrength,
+    sedimentSandBias: demo.getTerrainMaterialConfig().sedimentSandBias,
     erosion: { ...config.erosion },
     rivers: { ...config.rivers },
     shape: { ...config.shape }
@@ -958,6 +981,8 @@ function mergeDraftWithOverrides(
     blendSharpness: base.blendSharpness,
     shorelineStartOffset: base.shorelineStartOffset,
     shorelineEndOffset: base.shorelineEndOffset,
+    sedimentStrength: base.sedimentStrength,
+    sedimentSandBias: base.sedimentSandBias,
     erosion: {
       ...base.erosion,
       ...overrides.erosion
@@ -1180,6 +1205,8 @@ interface DraftConfig {
   blendSharpness: number;
   shorelineStartOffset: number;
   shorelineEndOffset: number;
+  sedimentStrength: number;
+  sedimentSandBias: number;
   erosion: MutableTerrainErosionConfig;
   rivers: MutableTerrainRiverConfig;
   shape: MutableTerrainShapeConfig;

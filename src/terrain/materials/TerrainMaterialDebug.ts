@@ -11,5 +11,6 @@ export enum TerrainDebugViewMode {
   RawHeight = 9,
   Flow = 10,
   River = 11,
-  Lake = 12
+  Lake = 12,
+  Sediment = 13
 }

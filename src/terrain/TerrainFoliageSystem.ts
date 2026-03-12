@@ -1,6 +1,7 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
@@ -15,7 +16,7 @@ import {
 type FoliageLODLevel = 0 | 1 | 2;
 
 interface TerrainFoliageChunk {
-  readonly lodMeshes: Record<FoliageLODLevel, Mesh[]>;
+  readonly lodMeshes: Record<FoliageLODLevel, InstancedMesh[]>;
   readonly center: Vector3;
   readonly instanceCount: number;
   readonly kindCounts: Record<TerrainFoliageKind, number>;
@@ -24,6 +25,7 @@ interface TerrainFoliageChunk {
 export class TerrainFoliageSystem {
   private readonly chunkFoliage = new Map<string, TerrainFoliageChunk>();
   private readonly prototypeMaterials: StandardMaterial[] = [];
+  private prototypes: Record<TerrainFoliageKind, Record<FoliageLODLevel, Mesh>> | null = null;
   private totalInstanceCount = 0;
   private visibleChunkCount = 0;
   private visibleInstanceCount = 0;
@@ -37,10 +39,11 @@ export class TerrainFoliageSystem {
   ) {}
 
   initialize(chunks: readonly TerrainChunk[]): void {
-    if (this.prototypeMaterials.length > 0) {
+    if (this.prototypes) {
       return;
     }
     this.createPrototypeMaterials();
+    this.prototypes = this.createPrototypes();
 
     for (const chunk of chunks) {
       const candidates = this.planner.generateCandidates(chunk.data);
@@ -107,22 +110,31 @@ export class TerrainFoliageSystem {
     this.totalKindCounts = createKindCounts();
     this.visibleKindCounts = createKindCounts();
 
+    if (this.prototypes) {
+      Object.values(this.prototypes).forEach((lodMeshes) => {
+        lodMeshes[0].dispose(false, true);
+        lodMeshes[1].dispose(false, true);
+        lodMeshes[2].dispose(false, true);
+      });
+      this.prototypes = null;
+    }
+
     this.prototypeMaterials.forEach((material) => material.dispose(false, true));
     this.prototypeMaterials.length = 0;
   }
 
   private createMeshesForLods(
     candidate: TerrainFoliageCandidate,
-    lodMeshes: Record<FoliageLODLevel, Mesh[]>
+    lodMeshes: Record<FoliageLODLevel, InstancedMesh[]>
   ): void {
     ([0, 1, 2] as FoliageLODLevel[]).forEach((lod) => {
-      const mesh = createFoliageMesh(
-        this.scene,
-        candidate.kind,
-        lod,
+      const prototype = this.prototypes?.[candidate.kind]?.[lod];
+      if (!prototype) {
+        return;
+      }
+      const mesh = prototype.createInstance(
         `${getFoliageMeshName(candidate.kind, lod)}-${Math.round(candidate.x)}-${Math.round(candidate.z)}`
       );
-      mesh.material = this.prototypeMaterials[candidate.kind];
       mesh.position.set(
         candidate.x,
         candidate.y + getFoliageHeightOffset(candidate.kind, lod) * candidate.scale,
@@ -155,6 +167,53 @@ export class TerrainFoliageSystem {
     rockMaterial.specularColor = Color3.Black();
 
     this.prototypeMaterials.push(treeMaterial, bushMaterial, rockMaterial);
+  }
+
+  private createPrototypes(): Record<TerrainFoliageKind, Record<FoliageLODLevel, Mesh>> {
+    return {
+      [TerrainFoliageKind.Tree]: {
+        0: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Tree, 0, "foliage-tree-lod0-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Tree]
+        ),
+        1: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Tree, 1, "foliage-tree-lod1-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Tree]
+        ),
+        2: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Tree, 2, "foliage-tree-lod2-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Tree]
+        )
+      },
+      [TerrainFoliageKind.Bush]: {
+        0: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Bush, 0, "foliage-bush-lod0-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Bush]
+        ),
+        1: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Bush, 1, "foliage-bush-lod1-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Bush]
+        ),
+        2: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Bush, 2, "foliage-bush-lod2-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Bush]
+        )
+      },
+      [TerrainFoliageKind.Rock]: {
+        0: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Rock, 0, "foliage-rock-lod0-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Rock]
+        ),
+        1: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Rock, 1, "foliage-rock-lod1-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Rock]
+        ),
+        2: createPrototypeMesh(
+          createFoliageMesh(this.scene, TerrainFoliageKind.Rock, 2, "foliage-rock-lod2-prototype"),
+          this.prototypeMaterials[TerrainFoliageKind.Rock]
+        )
+      }
+    };
   }
 
   private getChunkKey(chunkX: number, chunkZ: number): string {
@@ -226,12 +285,21 @@ function createKindCounts(): Record<TerrainFoliageKind, number> {
   };
 }
 
-function createLodMeshes(): Record<FoliageLODLevel, Mesh[]> {
+function createLodMeshes(): Record<FoliageLODLevel, InstancedMesh[]> {
   return {
     0: [],
     1: [],
     2: []
   };
+}
+
+function createPrototypeMesh(mesh: Mesh, material: StandardMaterial): Mesh {
+  mesh.material = material;
+  mesh.isVisible = false;
+  mesh.alwaysSelectAsActiveMesh = true;
+  mesh.isPickable = false;
+  mesh.receiveShadows = false;
+  return mesh;
 }
 
 function getLodScaleMultiplier(lod: FoliageLODLevel): number {

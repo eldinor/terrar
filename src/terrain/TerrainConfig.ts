@@ -21,6 +21,26 @@ export interface TerrainShapeConfig {
   readonly temperatureNoiseStrength: number;
 }
 
+export interface TerrainErosionConfig {
+  readonly enabled: boolean;
+  readonly resolution: number;
+  readonly iterations: number;
+  readonly talusHeight: number;
+  readonly smoothing: number;
+}
+
+export interface TerrainRiverConfig {
+  readonly enabled: boolean;
+  readonly resolution: number;
+  readonly flowThreshold: number;
+  readonly bankStrength: number;
+  readonly lakeThreshold: number;
+  readonly depth: number;
+  readonly maxDepth: number;
+  readonly minSlope: number;
+  readonly minElevation: number;
+}
+
 export interface TerrainConfig {
   readonly seed: number | string;
   readonly worldMin: number;
@@ -38,32 +58,56 @@ export interface TerrainConfig {
   readonly skirtDepth: number;
   readonly baseHeight: number;
   readonly maxHeight: number;
+  readonly erosion: TerrainErosionConfig;
+  readonly rivers: TerrainRiverConfig;
   readonly shape: TerrainShapeConfig;
 }
 
 export type TerrainConfigOverrides = Partial<
-  Omit<TerrainConfig, "worldSize" | "totalChunks" | "shape">
+  Omit<TerrainConfig, "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers">
 > & {
   shape?: Partial<TerrainShapeConfig>;
+  erosion?: Partial<TerrainErosionConfig>;
+  rivers?: Partial<TerrainRiverConfig>;
 };
 
 export const DEFAULT_TERRAIN_SHAPE_CONFIG: TerrainShapeConfig = Object.freeze({
   continentFrequency: 0.00115,
-  continentAmplitude: 72,
+  continentAmplitude: 82,
   continentBlend: 0.75,
   radialFalloffStrength: 0.65,
   mountainMaskFrequency: 0.0026,
-  mountainMaskMin: 0.48,
-  mountainMaskMax: 0.78,
-  mountainFrequency: 0.009,
-  mountainAmplitude: 118,
-  hillFrequency: 0.0065,
-  hillAmplitude: 42,
+  mountainMaskMin: 0.46,
+  mountainMaskMax: 0.8,
+  mountainFrequency: 0.0082,
+  mountainAmplitude: 132,
+  hillFrequency: 0.0062,
+  hillAmplitude: 44,
   detailFrequency: 0.031,
-  detailAmplitude: 7,
+  detailAmplitude: 6.5,
   moistureFrequency: 0.0018,
   temperatureNoiseFrequency: 0.0023,
   temperatureNoiseStrength: 0.3
+});
+
+export const DEFAULT_TERRAIN_EROSION_CONFIG: TerrainErosionConfig = Object.freeze({
+  enabled: true,
+  resolution: 257,
+  iterations: 10,
+  talusHeight: 1.7,
+  smoothing: 0.14
+});
+
+export const DEFAULT_TERRAIN_RIVER_CONFIG: TerrainRiverConfig = Object.freeze({
+  enabled: true,
+  resolution: 257,
+  flowThreshold: 0.82,
+  bankStrength: 0.54,
+  lakeThreshold: 1.55,
+  depth: 1.8,
+  maxDepth: 5.5,
+  minSlope: 0.026,
+  minElevation: 12
 });
 
 export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
@@ -81,8 +125,10 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   foliageRadius: 700,
   waterLevel: 0,
   skirtDepth: 12,
-  baseHeight: -24,
-  maxHeight: 220,
+  baseHeight: -18,
+  maxHeight: 260,
+  erosion: DEFAULT_TERRAIN_EROSION_CONFIG,
+  rivers: DEFAULT_TERRAIN_RIVER_CONFIG,
   shape: DEFAULT_TERRAIN_SHAPE_CONFIG
 });
 
@@ -96,6 +142,14 @@ export function mergeTerrainConfig(
   const chunkSize = overrides.chunkSize ?? DEFAULT_TERRAIN_CONFIG.chunkSize;
   const worldSize = worldMax - worldMin;
   const totalChunks = chunksPerAxis * chunksPerAxis;
+  const erosion = Object.freeze({
+    ...DEFAULT_TERRAIN_EROSION_CONFIG,
+    ...overrides.erosion
+  });
+  const rivers = Object.freeze({
+    ...DEFAULT_TERRAIN_RIVER_CONFIG,
+    ...overrides.rivers
+  });
   const shape = Object.freeze({
     ...DEFAULT_TERRAIN_SHAPE_CONFIG,
     ...overrides.shape
@@ -134,6 +188,8 @@ export function mergeTerrainConfig(
     skirtDepth: overrides.skirtDepth ?? DEFAULT_TERRAIN_CONFIG.skirtDepth,
     baseHeight: overrides.baseHeight ?? DEFAULT_TERRAIN_CONFIG.baseHeight,
     maxHeight: overrides.maxHeight ?? DEFAULT_TERRAIN_CONFIG.maxHeight,
+    erosion,
+    rivers,
     shape
   });
 }

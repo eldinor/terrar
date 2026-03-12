@@ -35,7 +35,7 @@ export class TerrainMaterialFactory {
     ensureTerrainBlendShadersRegistered();
 
     const material = new ShaderMaterial("terrain-material", scene, "terrainBlend", {
-      attributes: ["position", "normal", "uv"],
+      attributes: ["position", "normal", "uv", "uv2", "color"],
       uniforms: [
         "world",
         "worldViewProjection",
@@ -269,6 +269,8 @@ function ensureTerrainBlendShadersRegistered(): void {
     attribute vec3 position;
     attribute vec3 normal;
     attribute vec2 uv;
+    attribute vec2 uv2;
+    attribute vec4 color;
 
     uniform mat4 world;
     uniform mat4 worldViewProjection;
@@ -276,12 +278,16 @@ function ensureTerrainBlendShadersRegistered(): void {
     varying vec3 vWorldPos;
     varying vec3 vWorldNormal;
     varying vec2 vUV;
+    varying vec2 vUv2;
+    varying vec4 vColor;
 
     void main(void) {
       vec4 worldPos = world * vec4(position, 1.0);
       vWorldPos = worldPos.xyz;
       vWorldNormal = normalize(mat3(world) * normal);
       vUV = uv;
+      vUv2 = uv2;
+      vColor = color;
       gl_Position = worldViewProjection * vec4(position, 1.0);
     }
   `;
@@ -292,6 +298,8 @@ function ensureTerrainBlendShadersRegistered(): void {
     varying vec3 vWorldPos;
     varying vec3 vWorldNormal;
     varying vec2 vUV;
+    varying vec2 vUv2;
+    varying vec4 vColor;
 
     uniform sampler2D grassAlbedo;
     uniform sampler2D dirtAlbedo;
@@ -386,6 +394,16 @@ function ensureTerrainBlendShadersRegistered(): void {
       float slope = 1.0 - saturate(normalW.y);
       float materialSlope = pow(slope, 1.35);
       float height = vWorldPos.y;
+      float erosionWear = saturate(vColor.g);
+      float sediment = saturate(vColor.b);
+      float flow = saturate(vColor.a);
+      float river = saturate(vUv2.x);
+      float lake = saturate(vUv2.y);
+      float channelMask = saturate(flow * 1.15 + erosionWear * 0.35);
+      float wetRiver = smoothstep(0.03, 0.28, river);
+      float openRiver = smoothstep(0.2, 0.55, river);
+      float openLake = smoothstep(0.08, 0.32, lake);
+      float inlandWater = max(openRiver, openLake);
       float rock = smoothstep(rockSlopeStart, rockSlopeFull, materialSlope);
       float snow = smoothstep(snowStartHeight, snowFullHeight, height);
       float grassSlopeFavor = 1.0 - smoothstep(grassMaxSlope * 0.35, grassMaxSlope, materialSlope);
@@ -394,6 +412,16 @@ function ensureTerrainBlendShadersRegistered(): void {
       float dirtLowlandFavor = 1.0 - smoothstep(dirtLowHeight, dirtHighHeight, height);
       float dirtSlopeFavor = smoothstep(0.08, rockSlopeStart + 0.08, materialSlope) * (1.0 - rock * 0.7);
       float dirt = max(dirtLowlandFavor * 0.8, dirtSlopeFavor * 0.65) * (1.0 - snow) * (1.0 - rock * 0.45);
+
+      float erosionRockFavor = erosionWear * smoothstep(0.12, 0.58, materialSlope);
+      rock = max(rock, erosionRockFavor * 0.92);
+      dirt += erosionWear * 0.24 + channelMask * 0.18 + wetRiver * 0.28 + openLake * 0.18;
+      dirt += sediment * 0.42;
+      grass *= 1.0 - saturate(erosionWear * 0.42 + channelMask * 0.55);
+      grass *= 1.0 - saturate(sediment * 0.58 + openLake * 0.26);
+      snow *= 1.0 - channelMask * 0.08;
+      rock *= 1.0 - (wetRiver * 0.1 + openLake * 0.08);
+      rock *= 1.0 - sediment * 0.24;
 
       grass = pow(max(grass, 0.0), blendSharpness);
       dirt = pow(max(dirt, 0.0), blendSharpness);
@@ -421,12 +449,15 @@ function ensureTerrainBlendShadersRegistered(): void {
 
       vec4 grassCol = samplePlanarXZ(grassAlbedo, vWorldPos, grassScale);
       grassCol.rgb *= mix(vec3(0.82, 0.88, 0.78), vec3(1.12, 1.08, 0.92), macroMask);
+      grassCol.rgb *= mix(vec3(1.0), vec3(0.82, 0.9, 0.84), channelMask * 0.45);
 
       vec4 dirtCol = samplePlanarXZ(dirtAlbedo, vWorldPos, dirtScale);
       dirtCol.rgb *= mix(vec3(0.9, 0.86, 0.8), vec3(1.08, 1.02, 0.94), macroNoiseB);
+      dirtCol.rgb *= mix(vec3(0.96, 0.9, 0.82), vec3(0.54, 0.44, 0.34), channelMask * 0.7);
 
       vec4 rockCol = sampleTriplanar(rockAlbedo, vWorldPos, normalW, rockScale, triplanarSharpness);
       rockCol.rgb *= mix(vec3(0.86, 0.88, 0.9), vec3(1.06, 1.04, 1.02), macroMask);
+      rockCol.rgb *= mix(vec3(0.92, 0.9, 0.88), vec3(1.0, 0.98, 0.95), erosionWear * 0.3);
 
       vec4 snowCol = samplePlanarXZ(snowAlbedo, vWorldPos, snowScale);
       snowCol.rgb *= mix(vec3(0.92, 0.95, 1.0), vec3(1.02, 1.02, 1.0), macroNoiseA);
@@ -438,8 +469,15 @@ function ensureTerrainBlendShadersRegistered(): void {
       float shoreHeight = 1.0 - smoothstep(waterLevel + shorelineStartOffset, waterLevel + shorelineEndOffset, height);
       float shoreFlatness = 1.0 - smoothstep(0.08, 0.35, materialSlope);
       float sand = shoreHeight * shoreFlatness * (1.0 - rock) * (1.0 - snow);
+      float floodplain = sediment * (1.0 - smoothstep(0.14, 0.5, materialSlope)) * (1.0 - snow);
       dirt *= (1.0 - sand * 0.7);
       grass *= (1.0 - sand * 0.9);
+      dirt += flow * 0.08 * (1.0 - sand);
+      dirt += wetRiver * 0.18 + openLake * 0.16;
+      dirt += floodplain * 0.24;
+      grass *= 1.0 - (wetRiver * 0.62 + openLake * 0.82);
+      sand *= 1.0 - (wetRiver * 0.38 + openLake * 0.22);
+      sand += floodplain * (0.22 + shoreHeight * 0.18);
 
       float renormalized = max(grass + dirt + sand + rock + snow, 0.0001);
       grass /= renormalized;
@@ -450,6 +488,9 @@ function ensureTerrainBlendShadersRegistered(): void {
 
       vec4 sandCol = samplePlanarXZ(sandAlbedo, vWorldPos, sandScale);
       sandCol.rgb *= mix(vec3(0.94, 0.9, 0.82), vec3(1.04, 1.0, 0.92), macroMask);
+      sandCol.rgb *= mix(vec3(0.88, 0.82, 0.74), vec3(1.06, 1.02, 0.94), sediment);
+      vec3 wetTint = mix(vec3(0.0), vec3(0.08, 0.18, 0.22), max(wetRiver, lake * 0.55));
+      vec3 openWaterTint = mix(vec3(0.0), vec3(0.08, 0.28, 0.4), inlandWater);
 
       vec4 finalCol =
         grassCol * grass +
@@ -457,6 +498,8 @@ function ensureTerrainBlendShadersRegistered(): void {
         sandCol * sand +
         rockCol * rock +
         snowCol * snow;
+      finalCol.rgb = mix(finalCol.rgb, finalCol.rgb * vec3(0.62, 0.72, 0.78) + wetTint, max(wetRiver, openLake * 0.6) * 0.42);
+      finalCol.rgb = mix(finalCol.rgb, finalCol.rgb * vec3(0.34, 0.48, 0.58) + openWaterTint, inlandWater * 0.5);
 
       if (debugMode == 1) {
         finalCol = vec4(vec3(grass), 1.0);
@@ -472,6 +515,16 @@ function ensureTerrainBlendShadersRegistered(): void {
         finalCol = vec4(vec3(materialSlope), 1.0);
       } else if (debugMode == 7) {
         finalCol = vec4(triplanarBlend(normalW, triplanarSharpness), 1.0);
+      } else if (debugMode == 8) {
+        finalCol = vec4(mix(vec3(0.03, 0.05, 0.08), vec3(0.98, 0.47, 0.08), vColor.g), 1.0);
+      } else if (debugMode == 9) {
+        finalCol = vec4(vec3(vColor.r), 1.0);
+      } else if (debugMode == 10) {
+        finalCol = vec4(mix(vec3(0.02, 0.03, 0.04), vec3(0.18, 0.72, 1.0), vColor.a), 1.0);
+      } else if (debugMode == 11) {
+        finalCol = vec4(mix(vec3(0.03, 0.02, 0.01), vec3(0.1, 0.62, 1.0), max(river, lake)), 1.0);
+      } else if (debugMode == 12) {
+        finalCol = vec4(mix(vec3(0.04, 0.03, 0.02), vec3(0.16, 0.66, 1.0), lake), 1.0);
       } else {
         float diffuse = max(dot(normalW, normalize(lightDirection)), 0.0);
         float wrappedDiffuse = diffuse * 0.75 + 0.25;

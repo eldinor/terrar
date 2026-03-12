@@ -154,6 +154,14 @@ export function createTerrainDemo(
       const mergedOverrides: TerrainConfigOverrides = {
         ...config,
         ...nextOverrides,
+        erosion: {
+          ...config.erosion,
+          ...nextOverrides.erosion
+        },
+        rivers: {
+          ...config.rivers,
+          ...nextOverrides.rivers
+        },
         shape: {
           ...config.shape,
           ...nextOverrides.shape

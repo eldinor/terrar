@@ -6,6 +6,7 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { Scene } from "@babylonjs/core/scene";
 import { TerrainConfig } from "./TerrainConfig";
 import { ProceduralGenerator } from "./ProceduralGenerator";
@@ -13,6 +14,8 @@ import { ProceduralGenerator } from "./ProceduralGenerator";
 const WATER_SHADER_NAME = "terrainWater";
 const WATER_SURFACE_OFFSET = 0.02;
 const WATER_MASK_RESOLUTION = 512;
+const RIVER_MESH_THRESHOLD = 0.22;
+const LAKE_MESH_THRESHOLD = 0.08;
 
 export interface TerrainWaterConfig {
   readonly opacity: number;
@@ -23,6 +26,10 @@ export interface TerrainWaterConfig {
   readonly waveSpeedZ: number;
   readonly shallowColor: string;
   readonly deepColor: string;
+  readonly riverDischargeStrength: number;
+  readonly riverMeshThreshold: number;
+  readonly lakeMeshThreshold: number;
+  readonly inlandSmoothingPasses: number;
   readonly debugView: number;
 }
 
@@ -35,12 +42,20 @@ export const DEFAULT_TERRAIN_WATER_CONFIG: TerrainWaterConfig = Object.freeze({
   waveSpeedZ: -0.03,
   shallowColor: "#53A6B8",
   deepColor: "#1D5D78",
+  riverDischargeStrength: 1,
+  riverMeshThreshold: 0.22,
+  lakeMeshThreshold: 0.08,
+  inlandSmoothingPasses: 2,
   debugView: 0
 });
 
 export class TerrainWaterSystem {
-  private mesh: Mesh | null = null;
-  private material: ShaderMaterial | null = null;
+  private oceanMesh: Mesh | null = null;
+  private riverMesh: Mesh | null = null;
+  private lakeMesh: Mesh | null = null;
+  private oceanMaterial: ShaderMaterial | null = null;
+  private riverMaterial: ShaderMaterial | null = null;
+  private lakeMaterial: ShaderMaterial | null = null;
   private terrainHeightTexture: RawTexture | null = null;
   private waterLevel: number;
   private waterConfig: TerrainWaterConfig = { ...DEFAULT_TERRAIN_WATER_CONFIG };
@@ -54,25 +69,28 @@ export class TerrainWaterSystem {
   }
 
   initialize(): void {
-    if (this.mesh) {
+    if (this.oceanMesh) {
       return;
     }
 
     registerWaterShaders();
-    this.mesh = this.createMesh();
+    this.oceanMesh = this.createOceanMesh();
     this.terrainHeightTexture = this.createTerrainHeightTexture();
-    this.material = this.createMaterial();
-    this.mesh.material = this.material;
+    this.oceanMaterial = this.createMaterial("terrain-water-material");
+    this.oceanMesh.material = this.oceanMaterial;
+    this.rebuildInlandMeshes();
     this.updateMeshHeight();
   }
 
   update(timeSeconds: number, cameraPosition: Vector3): void {
-    if (!this.material) {
-      return;
-    }
+    [this.oceanMaterial, this.riverMaterial, this.lakeMaterial].forEach((material) => {
+      if (!material) {
+        return;
+      }
 
-    this.material.setFloat("time", timeSeconds);
-    this.material.setVector3("cameraPosition", cameraPosition);
+      material.setFloat("time", timeSeconds);
+      material.setVector3("cameraPosition", cameraPosition);
+    });
   }
 
   setWaterLevel(level: number): void {
@@ -85,12 +103,26 @@ export class TerrainWaterSystem {
   }
 
   setConfig(config: TerrainWaterConfig): void {
+    const previousConfig = this.waterConfig;
     this.waterConfig = { ...config };
-    if (!this.material) {
-      return;
+    if (this.oceanMaterial) {
+      this.applyConfigToMaterial(this.oceanMaterial, this.waterConfig);
     }
-
-    this.applyConfigToMaterial(this.material, this.waterConfig);
+    if (
+      previousConfig.riverDischargeStrength !== this.waterConfig.riverDischargeStrength ||
+      previousConfig.riverMeshThreshold !== this.waterConfig.riverMeshThreshold ||
+      previousConfig.lakeMeshThreshold !== this.waterConfig.lakeMeshThreshold ||
+      previousConfig.inlandSmoothingPasses !== this.waterConfig.inlandSmoothingPasses
+    ) {
+      this.rebuildInlandMeshes();
+    } else {
+      if (this.riverMaterial) {
+        this.applyConfigToMaterial(this.riverMaterial, this.getRiverConfig());
+      }
+      if (this.lakeMaterial) {
+        this.applyConfigToMaterial(this.lakeMaterial, this.getLakeConfig());
+      }
+    }
   }
 
   getConfig(): TerrainWaterConfig {
@@ -98,15 +130,23 @@ export class TerrainWaterSystem {
   }
 
   dispose(): void {
-    this.mesh?.dispose(false, true);
-    this.material?.dispose(false, true);
+    this.oceanMesh?.dispose(false, true);
+    this.riverMesh?.dispose(false, true);
+    this.lakeMesh?.dispose(false, true);
+    this.oceanMaterial?.dispose(false, true);
+    this.riverMaterial?.dispose(false, true);
+    this.lakeMaterial?.dispose(false, true);
     this.terrainHeightTexture?.dispose();
-    this.mesh = null;
-    this.material = null;
+    this.oceanMesh = null;
+    this.riverMesh = null;
+    this.lakeMesh = null;
+    this.oceanMaterial = null;
+    this.riverMaterial = null;
+    this.lakeMaterial = null;
     this.terrainHeightTexture = null;
   }
 
-  private createMesh(): Mesh {
+  private createOceanMesh(): Mesh {
     const mesh = CreateGround(
       "terrain-water",
       {
@@ -123,9 +163,224 @@ export class TerrainWaterSystem {
     return mesh;
   }
 
-  private createMaterial(): ShaderMaterial {
+  private createInlandMesh(
+    inlandGrid: InlandWaterVertex[],
+    kind: "river" | "lake"
+  ): Mesh | null {
+    const resolution = Math.max(17, this.config.rivers.resolution | 0);
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const uvs: number[] = [];
+    let vertexOffset = 0;
+
+    for (let z = 0; z < resolution - 1; z += 1) {
+      for (let x = 0; x < resolution - 1; x += 1) {
+        const corners = [
+          inlandGrid[this.toGridIndex(x, z, resolution)],
+          inlandGrid[this.toGridIndex(x + 1, z, resolution)],
+          inlandGrid[this.toGridIndex(x, z + 1, resolution)],
+          inlandGrid[this.toGridIndex(x + 1, z + 1, resolution)]
+        ] as const;
+        const maxRiverMeshSignal = Math.max(
+          corners[0].riverMeshSignal,
+          corners[1].riverMeshSignal,
+          corners[2].riverMeshSignal,
+          corners[3].riverMeshSignal
+        );
+        const maxInlandWater = Math.max(
+          Math.max(corners[0].river, corners[0].lake),
+          Math.max(corners[1].river, corners[1].lake),
+          Math.max(corners[2].river, corners[2].lake),
+          Math.max(corners[3].river, corners[3].lake)
+        );
+        const maxLakeSignal = Math.max(corners[0].lake, corners[1].lake, corners[2].lake, corners[3].lake);
+
+        if (kind === "river" && maxRiverMeshSignal <= this.waterConfig.riverMeshThreshold) {
+          continue;
+        }
+
+        if (kind === "lake" && maxLakeSignal <= this.waterConfig.lakeMeshThreshold) {
+          continue;
+        }
+
+        if (
+          maxInlandWater <= this.waterConfig.lakeMeshThreshold &&
+          maxRiverMeshSignal <= this.waterConfig.riverMeshThreshold
+        ) {
+          continue;
+        }
+
+        corners.forEach((corner) => {
+          positions.push(corner.x, corner.y, corner.z);
+          uvs.push(corner.u, corner.v);
+        });
+
+        indices.push(
+          vertexOffset,
+          vertexOffset + 2,
+          vertexOffset + 1,
+          vertexOffset + 1,
+          vertexOffset + 2,
+          vertexOffset + 3
+        );
+        vertexOffset += 4;
+      }
+    }
+
+    if (positions.length === 0) {
+      return null;
+    }
+
+    const normals = new Array<number>(positions.length).fill(0);
+    VertexData.ComputeNormals(positions, indices, normals);
+
+    const mesh = new Mesh(kind === "river" ? "terrain-rivers" : "terrain-lakes", this.scene);
+    const vertexData = new VertexData();
+    vertexData.positions = positions;
+    vertexData.indices = indices;
+    vertexData.normals = normals;
+    vertexData.uvs = uvs;
+    vertexData.applyToMesh(mesh, true);
+    mesh.isPickable = false;
+    mesh.renderingGroupId = 0;
+    mesh.freezeWorldMatrix();
+    return mesh;
+  }
+
+  private createInlandWaterGrid(
+    resolution: number,
+    step: number
+  ): InlandWaterVertex[] {
+    const vertices = new Array<InlandWaterVertex>(resolution * resolution);
+
+    for (let gridZ = 0; gridZ < resolution; gridZ += 1) {
+      for (let gridX = 0; gridX < resolution; gridX += 1) {
+        vertices[this.toGridIndex(gridX, gridZ, resolution)] = this.sampleRiverCorner(
+          gridX,
+          gridZ,
+          step,
+          resolution
+        );
+      }
+    }
+
+    smoothInlandWaterGrid(
+      vertices,
+      resolution,
+      Math.max(0, Math.round(this.waterConfig.inlandSmoothingPasses))
+    );
+    return vertices;
+  }
+
+  private sampleRiverCorner(
+    gridX: number,
+    gridZ: number,
+    step: number,
+    resolution: number
+  ): InlandWaterVertex {
+    const x = this.config.worldMin + gridX * step;
+    const z = this.config.worldMin + gridZ * step;
+    const sample = this.generator.sample(x, z);
+    const isLake = sample.lake >= this.waterConfig.lakeMeshThreshold;
+    const discharge = smoothStep(this.config.rivers.flowThreshold, 1, sample.flow);
+    const dischargeStrength = this.waterConfig.riverDischargeStrength;
+    const riverMeshSignal = sample.river * (0.72 + discharge * 0.85 * dischargeStrength);
+    const lift =
+      WATER_SURFACE_OFFSET +
+      0.08 +
+      sample.river * 0.28 +
+      discharge * 0.22 * dischargeStrength;
+    return {
+      x,
+      y: isLake ? sample.lakeSurfaceHeight + WATER_SURFACE_OFFSET : sample.height + lift,
+      z,
+      river: sample.river,
+      lake: sample.lake,
+      riverMeshSignal,
+      u: gridX / Math.max(1, resolution - 1),
+      v: gridZ / Math.max(1, resolution - 1)
+    };
+  }
+
+  private rebuildInlandMeshes(): void {
+    this.disposeInlandMeshes();
+
+    if (!this.config.rivers.enabled) {
+      return;
+    }
+
+    const inlandResolution = Math.max(17, this.config.rivers.resolution | 0);
+    const inlandGrid = this.createInlandWaterGrid(
+      inlandResolution,
+      this.config.worldSize / (inlandResolution - 1)
+    );
+    this.riverMesh = this.createInlandMesh(inlandGrid, "river");
+    this.lakeMesh = this.createInlandMesh(inlandGrid, "lake");
+
+    if (this.riverMesh) {
+      this.riverMaterial = this.createMaterial("terrain-river-material", this.getRiverConfig());
+      this.riverMesh.material = this.riverMaterial;
+    }
+
+    if (this.lakeMesh) {
+      this.lakeMaterial = this.createMaterial("terrain-lake-material", this.getLakeConfig());
+      this.lakeMesh.material = this.lakeMaterial;
+    }
+  }
+
+  private disposeInlandMeshes(): void {
+    this.riverMesh?.dispose(false, true);
+    this.lakeMesh?.dispose(false, true);
+    this.riverMaterial?.dispose(false, true);
+    this.lakeMaterial?.dispose(false, true);
+    this.riverMesh = null;
+    this.lakeMesh = null;
+    this.riverMaterial = null;
+    this.lakeMaterial = null;
+  }
+
+  private getRiverConfig(): TerrainWaterConfig {
+    return {
+      ...this.waterConfig,
+      opacity: Math.min(0.96, this.waterConfig.opacity + 0.1),
+      shoreFadeDistance: Math.min(6, this.waterConfig.shoreFadeDistance),
+      waveScaleX: this.waterConfig.waveScaleX * 2.1,
+      waveScaleZ: this.waterConfig.waveScaleZ * 2.1,
+      waveSpeedX: this.waterConfig.waveSpeedX * 1.35,
+      waveSpeedZ: this.waterConfig.waveSpeedZ * 1.35,
+      shallowColor: "#4E9BB0",
+      deepColor: "#1A5570"
+    };
+  }
+
+  private getLakeConfig(): TerrainWaterConfig {
+    return {
+      ...this.waterConfig,
+      opacity: Math.min(0.9, this.waterConfig.opacity + 0.04),
+      shoreFadeDistance: Math.max(8, this.waterConfig.shoreFadeDistance),
+      waveScaleX: this.waterConfig.waveScaleX * 0.75,
+      waveScaleZ: this.waterConfig.waveScaleZ * 0.75,
+      waveSpeedX: this.waterConfig.waveSpeedX * 0.5,
+      waveSpeedZ: this.waterConfig.waveSpeedZ * 0.5,
+      shallowColor: "#6AAFC1",
+      deepColor: "#255C76"
+    };
+  }
+
+  private toGridIndex(x: number, z: number, resolution: number): number {
+    return z * resolution + x;
+  }
+
+  private createMaterial(
+    name: string,
+    overrides: Partial<TerrainWaterConfig> = {}
+  ): ShaderMaterial {
+    const runtimeConfig = {
+      ...this.waterConfig,
+      ...overrides
+    };
     const material = new ShaderMaterial(
-      "terrain-water-material",
+      name,
       this.scene,
       WATER_SHADER_NAME,
       {
@@ -168,7 +423,7 @@ export class TerrainWaterSystem {
     material.setFloat("worldSize", this.config.worldSize);
     material.setFloat("terrainBaseHeight", this.config.baseHeight);
     material.setFloat("terrainMaxHeight", this.config.maxHeight);
-    this.applyConfigToMaterial(material, this.waterConfig);
+    this.applyConfigToMaterial(material, runtimeConfig);
     if (this.terrainHeightTexture) {
       material.setTexture("terrainHeightMap", this.terrainHeightTexture);
     }
@@ -177,11 +432,11 @@ export class TerrainWaterSystem {
   }
 
   private updateMeshHeight(): void {
-    if (!this.mesh) {
+    if (!this.oceanMesh) {
       return;
     }
 
-    this.mesh.position.y = this.waterLevel + WATER_SURFACE_OFFSET;
+    this.oceanMesh.position.y = this.waterLevel + WATER_SURFACE_OFFSET;
   }
 
   private createTerrainHeightTexture(): RawTexture {
@@ -232,6 +487,82 @@ export class TerrainWaterSystem {
     );
     material.setFloat("alpha", config.opacity);
     material.setInt("debugView", config.debugView);
+  }
+}
+
+interface InlandWaterVertex {
+  x: number;
+  y: number;
+  z: number;
+  river: number;
+  lake: number;
+  riverMeshSignal: number;
+  u: number;
+  v: number;
+}
+
+function smoothInlandWaterGrid(
+  vertices: InlandWaterVertex[],
+  resolution: number,
+  passes: number
+): void {
+  const offsets: readonly [number, number][] = [
+    [0, 0],
+    [0, -1],
+    [-1, 0],
+    [1, 0],
+    [0, 1],
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1]
+  ];
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextHeights = new Float32Array(vertices.length);
+    const nextRiver = new Float32Array(vertices.length);
+    const nextLake = new Float32Array(vertices.length);
+    const nextRiverMeshSignal = new Float32Array(vertices.length);
+
+    for (let z = 0; z < resolution; z += 1) {
+      for (let x = 0; x < resolution; x += 1) {
+        const index = z * resolution + x;
+        let totalWeight = 0;
+        let totalHeight = 0;
+        let totalRiver = 0;
+        let totalLake = 0;
+        let totalRiverMeshSignal = 0;
+
+        offsets.forEach(([offsetX, offsetZ]) => {
+          const nx = x + offsetX;
+          const nz = z + offsetZ;
+          if (nx < 0 || nz < 0 || nx >= resolution || nz >= resolution) {
+            return;
+          }
+
+          const neighbor = vertices[nz * resolution + nx];
+          const weight = offsetX === 0 && offsetZ === 0 ? 0.28 : 0.09;
+          totalWeight += weight;
+          totalHeight += neighbor.y * weight;
+          totalRiver += neighbor.river * weight;
+          totalLake += neighbor.lake * weight;
+          totalRiverMeshSignal += neighbor.riverMeshSignal * weight;
+        });
+
+        nextHeights[index] = totalHeight / Math.max(totalWeight, 0.0001);
+        nextRiver[index] = totalRiver / Math.max(totalWeight, 0.0001);
+        nextLake[index] = totalLake / Math.max(totalWeight, 0.0001);
+        nextRiverMeshSignal[index] =
+          totalRiverMeshSignal / Math.max(totalWeight, 0.0001);
+      }
+    }
+
+    for (let index = 0; index < vertices.length; index += 1) {
+      vertices[index].y = nextHeights[index];
+      vertices[index].river = nextRiver[index];
+      vertices[index].lake = nextLake[index];
+      vertices[index].riverMeshSignal = nextRiverMeshSignal[index];
+    }
   }
 }
 
@@ -352,4 +683,9 @@ function registerWaterShaders(): void {
       gl_FragColor = vec4(color, alpha * max(shoreFade, 0.18));
     }
   `;
+}
+
+function smoothStep(min: number, max: number, value: number): number {
+  const t = Math.max(0, Math.min(1, (value - min) / Math.max(max - min, 0.0001)));
+  return t * t * (3 - 2 * t);
 }

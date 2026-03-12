@@ -6,6 +6,10 @@ export enum TerrainDebugViewMode {
   SnowWeight = 4,
   Height = 5,
   Slope = 6,
-  TriplanarBlend = 7
+  TriplanarBlend = 7,
+  Erosion = 8,
+  RawHeight = 9,
+  Flow = 10,
+  River = 11,
+  Lake = 12
 }
-

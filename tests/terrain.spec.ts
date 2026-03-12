@@ -4,6 +4,7 @@ import { TerrainChunkData } from "../src/terrain/TerrainChunkData";
 import {
   DEFAULT_TERRAIN_CONFIG,
   mergeTerrainConfig,
+  TerrainConfig,
   TerrainLODLevel
 } from "../src/terrain/TerrainConfig";
 import { TerrainFoliagePlanner } from "../src/terrain/TerrainFoliagePlanner";
@@ -36,6 +37,167 @@ describe("Procedural terrain determinism", () => {
     const sampleB = generatorB.sample(123.5, -78.25);
 
     expect(sampleA).not.toEqual(sampleB);
+  });
+
+  it("applies thermal erosion deterministically", () => {
+    const config = mergeTerrainConfig({ seed: "erosion-seed" });
+    const generatorA = new ProceduralGenerator(config);
+    const generatorB = new ProceduralGenerator(config);
+
+    const sampleA = generatorA.sample(-210.25, 167.75);
+    const sampleB = generatorB.sample(-210.25, 167.75);
+
+    expect(sampleA.height).toBeCloseTo(sampleB.height, 6);
+  });
+
+  it("changes terrain heights when erosion is disabled", () => {
+    const configWithErosion = mergeTerrainConfig({ seed: "erosion-compare" });
+    const configWithoutErosion = mergeTerrainConfig({
+      seed: "erosion-compare",
+      erosion: {
+        enabled: false
+      }
+    });
+    const eroded = new ProceduralGenerator(configWithErosion);
+    const raw = new ProceduralGenerator(configWithoutErosion);
+
+    const sample = { x: 144.5, z: -233.25 };
+    const erodedHeight = eroded.sample(sample.x, sample.z).height;
+    const rawHeight = raw.sample(sample.x, sample.z).height;
+
+    expect(erodedHeight).not.toBeCloseTo(rawHeight, 3);
+  });
+
+  it("biases erosion transport downhill instead of only smoothing locally", () => {
+    const config = mergeTerrainConfig({
+      seed: "erosion-flow",
+      erosion: {
+        enabled: true,
+        iterations: 32,
+        talusHeight: 0.8,
+        smoothing: 0.3
+      }
+    });
+    const generator = new ProceduralGenerator(config);
+
+    const ridge = generator.sample(90, -120).height;
+    const downhill = generator.sample(104, -106).height;
+    const lowerFan = generator.sample(118, -92).height;
+
+    expect(ridge).toBeGreaterThan(downhill);
+    expect(downhill).toBeGreaterThan(config.baseHeight);
+    expect(lowerFan).toBeGreaterThan(config.baseHeight);
+  });
+
+  it("produces deterministic non-zero flow accumulation", () => {
+    const config = mergeTerrainConfig({ seed: "flow-seed" });
+    const generatorA = new ProceduralGenerator(config);
+    const generatorB = new ProceduralGenerator(config);
+
+    const sampleA = generatorA.sample(96, -144);
+    const sampleB = generatorB.sample(96, -144);
+
+    expect(sampleA.flow).toBeCloseTo(sampleB.flow, 6);
+    expect(sampleA.flow).toBeGreaterThanOrEqual(0);
+    expect(sampleA.flow).toBeLessThanOrEqual(1);
+  });
+
+  it("produces deterministic river strength in drainage channels", () => {
+    const config = mergeTerrainConfig({
+      seed: "river-seed",
+      rivers: {
+        enabled: true,
+        flowThreshold: 0.72
+      }
+    });
+    const generatorA = new ProceduralGenerator(config);
+    const generatorB = new ProceduralGenerator(config);
+
+    const point = findStrongRiverPoint(generatorA, config);
+    const sampleA = generatorA.sample(point.x, point.z);
+    const sampleB = generatorB.sample(point.x, point.z);
+
+    expect(sampleA.river).toBeCloseTo(sampleB.river, 6);
+    expect(sampleA.river).toBeGreaterThanOrEqual(0);
+    expect(sampleA.river).toBeLessThanOrEqual(1);
+    expect(sampleA.river).toBeGreaterThan(0.05);
+  });
+
+  it("carves terrain lower when rivers are enabled", () => {
+    const withRivers = mergeTerrainConfig({
+      seed: "river-carve",
+      rivers: {
+        enabled: true,
+        flowThreshold: 0.7,
+        depth: 2.4,
+        maxDepth: 8
+      }
+    });
+    const withoutRivers = mergeTerrainConfig({
+      seed: "river-carve",
+      rivers: {
+        enabled: false
+      }
+    });
+    const riverGenerator = new ProceduralGenerator(withRivers);
+    const dryGenerator = new ProceduralGenerator(withoutRivers);
+
+    const point = findStrongRiverPoint(riverGenerator, withRivers);
+    const riverSample = riverGenerator.sample(point.x, point.z);
+    const drySample = dryGenerator.sample(point.x, point.z);
+
+    expect(riverSample.river).toBeGreaterThan(0.03);
+    expect(riverSample.height).toBeLessThan(drySample.height);
+  });
+
+  it("produces deterministic lake basins when depressions are filled", () => {
+    const config = mergeTerrainConfig({
+      seed: "lake-seed",
+      rivers: {
+        enabled: true,
+        flowThreshold: 0.68,
+        bankStrength: 0.82,
+        lakeThreshold: 0.55,
+        maxDepth: 8,
+        minElevation: 4
+      }
+    });
+    const generatorA = new ProceduralGenerator(config);
+    const generatorB = new ProceduralGenerator(config);
+
+    const point = findStrongLakePoint(generatorA, config);
+    const sampleA = generatorA.sample(point.x, point.z);
+    const sampleB = generatorB.sample(point.x, point.z);
+
+    expect(sampleA.lake).toBeCloseTo(sampleB.lake, 6);
+    expect(sampleA.lake).toBeGreaterThanOrEqual(0);
+    expect(sampleA.lake).toBeLessThanOrEqual(1);
+    expect(sampleA.lake).toBeGreaterThan(0.03);
+    expect(sampleA.lakeSurfaceHeight).toBeGreaterThanOrEqual(sampleA.height);
+  });
+
+  it("produces deterministic sediment deposition along channels and basins", () => {
+    const config = mergeTerrainConfig({
+      seed: "sediment-seed",
+      rivers: {
+        enabled: true,
+        flowThreshold: 0.72,
+        lakeThreshold: 0.8
+      }
+    });
+    const generatorA = new ProceduralGenerator(config);
+    const generatorB = new ProceduralGenerator(config);
+
+    const riverPoint = findStrongRiverPoint(generatorA, config);
+    const lakePoint = findStrongLakePoint(generatorA, config);
+    const riverSampleA = generatorA.sample(riverPoint.x, riverPoint.z);
+    const riverSampleB = generatorB.sample(riverPoint.x, riverPoint.z);
+    const lakeSampleA = generatorA.sample(lakePoint.x, lakePoint.z);
+
+    expect(riverSampleA.sediment).toBeCloseTo(riverSampleB.sediment, 6);
+    expect(riverSampleA.sediment).toBeGreaterThanOrEqual(0);
+    expect(riverSampleA.sediment).toBeLessThanOrEqual(1);
+    expect(Math.max(riverSampleA.sediment, lakeSampleA.sediment)).toBeGreaterThan(0.05);
   });
 });
 
@@ -202,7 +364,48 @@ function assertSharedBorder(
       expect(firstGrid.heights[firstIndex]).toBe(secondGrid.heights[secondIndex]);
       expect(firstGrid.moisture[firstIndex]).toBe(secondGrid.moisture[secondIndex]);
       expect(firstGrid.temperature[firstIndex]).toBe(secondGrid.temperature[secondIndex]);
+      expect(firstGrid.river[firstIndex]).toBe(secondGrid.river[secondIndex]);
+      expect(firstGrid.lake[firstIndex]).toBe(secondGrid.lake[secondIndex]);
+      expect(firstGrid.sediment[firstIndex]).toBe(secondGrid.sediment[secondIndex]);
       expect(firstGrid.biomes[firstIndex]).toBe(secondGrid.biomes[secondIndex]);
     }
   });
+}
+
+function findStrongRiverPoint(
+  generator: ProceduralGenerator,
+  config: TerrainConfig
+): { x: number; z: number } {
+  let best = { x: 0, z: 0, river: -1 };
+  const step = 32;
+
+  for (let z = config.worldMin; z <= config.worldMax; z += step) {
+    for (let x = config.worldMin; x <= config.worldMax; x += step) {
+      const river = generator.sample(x, z).river;
+      if (river > best.river) {
+        best = { x, z, river };
+      }
+    }
+  }
+
+  return { x: best.x, z: best.z };
+}
+
+function findStrongLakePoint(
+  generator: ProceduralGenerator,
+  config: TerrainConfig
+): { x: number; z: number } {
+  let best = { x: 0, z: 0, lake: -1 };
+  const step = 32;
+
+  for (let z = config.worldMin; z <= config.worldMax; z += step) {
+    for (let x = config.worldMin; x <= config.worldMax; x += step) {
+      const lake = generator.sample(x, z).lake;
+      if (lake > best.lake) {
+        best = { x, z, lake };
+      }
+    }
+  }
+
+  return { x: best.x, z: best.z };
 }

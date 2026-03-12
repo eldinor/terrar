@@ -1,4 +1,9 @@
-import type { TerrainConfigOverrides, TerrainShapeConfig } from "./terrain/TerrainConfig";
+import type {
+  TerrainConfigOverrides,
+  TerrainErosionConfig,
+  TerrainRiverConfig,
+  TerrainShapeConfig
+} from "./terrain/TerrainConfig";
 import type { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
 import {
   TerrainDebugViewMode,
@@ -222,6 +227,30 @@ function renderRuntimeTab(): void {
   panel.appendChild(
     createSlider("Wave Speed Z", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedZ, (value) => {
       draftConfig.water.waveSpeedZ = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("River Discharge", 0.4, 1.8, 0.05, draftConfig.water.riverDischargeStrength, (value) => {
+      draftConfig.water.riverDischargeStrength = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("River Mesh Cutoff", 0.05, 0.6, 0.01, draftConfig.water.riverMeshThreshold, (value) => {
+      draftConfig.water.riverMeshThreshold = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Lake Mesh Cutoff", 0.02, 0.3, 0.01, draftConfig.water.lakeMeshThreshold, (value) => {
+      draftConfig.water.lakeMeshThreshold = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Inland Smooth", 0, 6, 1, draftConfig.water.inlandSmoothingPasses, (value) => {
+      draftConfig.water.inlandSmoothingPasses = value;
       applyDraftWaterConfig();
     })
   );
@@ -494,6 +523,80 @@ function renderWorldTab(): void {
     })
   );
   panel.appendChild(createDivider());
+  panel.appendChild(createSectionLabel("Erosion"));
+  panel.appendChild(
+    createCheckbox("Enable Erosion", draftConfig.erosion.enabled, (checked) => {
+      draftConfig.erosion.enabled = checked;
+    })
+  );
+  panel.appendChild(
+    createSlider("Erosion Grid", 65, 513, 32, draftConfig.erosion.resolution, (value) => {
+      draftConfig.erosion.resolution = clampErosionResolution(value);
+    })
+  );
+  panel.appendChild(
+    createSlider("Iterations", 0, 48, 1, draftConfig.erosion.iterations, (value) => {
+      draftConfig.erosion.iterations = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("Talus Height", 0.25, 4, 0.05, draftConfig.erosion.talusHeight, (value) => {
+      draftConfig.erosion.talusHeight = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("Smoothing", 0.02, 0.45, 0.01, draftConfig.erosion.smoothing, (value) => {
+      draftConfig.erosion.smoothing = value;
+    })
+  );
+  panel.appendChild(createDivider());
+  panel.appendChild(createSectionLabel("Rivers"));
+  panel.appendChild(
+    createCheckbox("Enable Rivers", draftConfig.rivers.enabled, (checked) => {
+      draftConfig.rivers.enabled = checked;
+    })
+  );
+  panel.appendChild(
+    createSlider("River Grid", 65, 513, 32, draftConfig.rivers.resolution, (value) => {
+      draftConfig.rivers.resolution = clampErosionResolution(value);
+    })
+  );
+  panel.appendChild(
+    createSlider("Flow Threshold", 0.45, 0.95, 0.01, draftConfig.rivers.flowThreshold, (value) => {
+      draftConfig.rivers.flowThreshold = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("Bank Width", 0.2, 1, 0.02, draftConfig.rivers.bankStrength, (value) => {
+      draftConfig.rivers.bankStrength = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("Lake Threshold", 0.2, 3, 0.05, draftConfig.rivers.lakeThreshold, (value) => {
+      draftConfig.rivers.lakeThreshold = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("River Depth", 0.2, 6, 0.1, draftConfig.rivers.depth, (value) => {
+      draftConfig.rivers.depth = Math.min(value, draftConfig.rivers.maxDepth);
+    })
+  );
+  panel.appendChild(
+    createSlider("Max Depth", 1, 14, 0.25, draftConfig.rivers.maxDepth, (value) => {
+      draftConfig.rivers.maxDepth = Math.max(value, draftConfig.rivers.depth);
+    })
+  );
+  panel.appendChild(
+    createSlider("Min Slope", 0, 0.12, 0.002, draftConfig.rivers.minSlope, (value) => {
+      draftConfig.rivers.minSlope = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("Min Elevation", 0, 32, 1, draftConfig.rivers.minElevation, (value) => {
+      draftConfig.rivers.minElevation = value;
+    })
+  );
+  panel.appendChild(createDivider());
   panel.appendChild(createActionButtons());
 }
 
@@ -636,7 +739,12 @@ function createDebugModeControl(): HTMLElement {
     ["Snow Weight", TerrainDebugViewMode.SnowWeight],
     ["Height", TerrainDebugViewMode.Height],
     ["Slope", TerrainDebugViewMode.Slope],
-    ["Triplanar Blend", TerrainDebugViewMode.TriplanarBlend]
+    ["Triplanar Blend", TerrainDebugViewMode.TriplanarBlend],
+    ["Erosion", TerrainDebugViewMode.Erosion],
+    ["Raw Height", TerrainDebugViewMode.RawHeight],
+    ["Flow", TerrainDebugViewMode.Flow],
+    ["River", TerrainDebugViewMode.River],
+    ["Lake", TerrainDebugViewMode.Lake]
   ];
 
   modes.forEach(([label, value]) => {
@@ -808,6 +916,8 @@ function buildDraftConfig(): DraftConfig {
     blendSharpness: demo.getTerrainMaterialConfig().blendSharpness,
     shorelineStartOffset: demo.getTerrainMaterialConfig().shorelineStartOffset,
     shorelineEndOffset: demo.getTerrainMaterialConfig().shorelineEndOffset,
+    erosion: { ...config.erosion },
+    rivers: { ...config.rivers },
     shape: { ...config.shape }
   };
 }
@@ -821,6 +931,8 @@ function buildTerrainOverridesFromDraft(): TerrainConfigOverrides {
     collisionRadius: draftConfig.collisionRadius,
     foliageRadius: draftConfig.foliageRadius,
     lodDistances: draftConfig.lodDistances,
+    erosion: { ...draftConfig.erosion },
+    rivers: { ...draftConfig.rivers },
     shape: { ...draftConfig.shape }
   };
 }
@@ -846,6 +958,14 @@ function mergeDraftWithOverrides(
     blendSharpness: base.blendSharpness,
     shorelineStartOffset: base.shorelineStartOffset,
     shorelineEndOffset: base.shorelineEndOffset,
+    erosion: {
+      ...base.erosion,
+      ...overrides.erosion
+    },
+    rivers: {
+      ...base.rivers,
+      ...overrides.rivers
+    },
     shape: {
       ...base.shape,
       ...overrides.shape
@@ -1060,6 +1180,8 @@ interface DraftConfig {
   blendSharpness: number;
   shorelineStartOffset: number;
   shorelineEndOffset: number;
+  erosion: MutableTerrainErosionConfig;
+  rivers: MutableTerrainRiverConfig;
   shape: MutableTerrainShapeConfig;
 }
 
@@ -1067,6 +1189,20 @@ type MutableTerrainShapeConfig = {
   -readonly [Key in keyof TerrainShapeConfig]: TerrainShapeConfig[Key];
 };
 
+type MutableTerrainErosionConfig = {
+  -readonly [Key in keyof TerrainErosionConfig]: TerrainErosionConfig[Key];
+};
+
+type MutableTerrainRiverConfig = {
+  -readonly [Key in keyof TerrainRiverConfig]: TerrainRiverConfig[Key];
+};
+
 type MutableTerrainWaterConfig = {
   -readonly [Key in keyof TerrainWaterConfig]: TerrainWaterConfig[Key];
 };
+
+function clampErosionResolution(value: number): number {
+  const rounded = Math.round(value);
+  const clamped = Math.max(65, Math.min(513, rounded));
+  return clamped % 2 === 0 ? clamped + 1 : clamped;
+}

@@ -7,6 +7,12 @@ export interface TerrainSampleGrid {
   readonly resolution: number;
   readonly step: number;
   readonly heights: Float32Array;
+  readonly rawHeights: Float32Array;
+  readonly erosionDeltas: Float32Array;
+  readonly flow: Float32Array;
+  readonly river: Float32Array;
+  readonly lake: Float32Array;
+  readonly sediment: Float32Array;
   readonly moisture: Float32Array;
   readonly temperature: Float32Array;
   readonly slopes: Float32Array;
@@ -73,6 +79,12 @@ export class TerrainChunkData {
     const vertexCount = resolution * resolution;
     const step = this.config.chunkSize / (resolution - 1);
     const heights = new Float32Array(vertexCount);
+    const rawHeights = new Float32Array(vertexCount);
+    const erosionDeltas = new Float32Array(vertexCount);
+    const flow = new Float32Array(vertexCount);
+    const river = new Float32Array(vertexCount);
+    const lake = new Float32Array(vertexCount);
+    const sediment = new Float32Array(vertexCount);
     const moisture = new Float32Array(vertexCount);
     const temperature = new Float32Array(vertexCount);
     const slopes = new Float32Array(vertexCount);
@@ -85,8 +97,15 @@ export class TerrainChunkData {
         const sampleX = this.minX + x * step;
         const sampleZ = this.minZ + z * step;
         const sample = this.generator.sample(sampleX, sampleZ);
+        const rawHeight = this.generator.sampleBaseTerrainHeight(sampleX, sampleZ);
         const index = this.toIndex(x, z, resolution);
         heights[index] = sample.height;
+        rawHeights[index] = rawHeight;
+        erosionDeltas[index] = rawHeight - sample.height;
+        flow[index] = sample.flow;
+        river[index] = sample.river;
+        lake[index] = sample.lake;
+        sediment[index] = sample.sediment;
         moisture[index] = sample.moisture;
         temperature[index] = sample.temperature;
         waterDepth[index] = Math.max(0, this.config.waterLevel - sample.height);
@@ -111,7 +130,12 @@ export class TerrainChunkData {
           {
             height: heights[index],
             moisture: moisture[index],
-            temperature: temperature[index]
+            temperature: temperature[index],
+            flow: flow[index],
+            river: river[index],
+            lake: lake[index],
+            sediment: sediment[index],
+            lakeSurfaceHeight: heights[index]
           },
           normalizedSlope,
           this.config
@@ -129,6 +153,12 @@ export class TerrainChunkData {
       resolution,
       step,
       heights,
+      rawHeights,
+      erosionDeltas,
+      flow,
+      river,
+      lake,
+      sediment,
       moisture,
       temperature,
       slopes,

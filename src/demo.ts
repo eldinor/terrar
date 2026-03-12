@@ -175,12 +175,16 @@ function renderHud(): void {
     `poi: ${poi.total} | roads: ${roads.totalRoads} | ${workerText}${buildText}`;
 }
 
-renderHud();
-renderPanel();
-renderFeaturePanel();
-demo.subscribeBuildStatus((status) => {
-  buildStatus = status;
   renderHud();
+  renderPanel();
+  renderFeaturePanel();
+  window.setInterval(() => {
+    renderHud();
+    updateFeatureBuildStatus();
+  }, 250);
+  demo.subscribeBuildStatus((status) => {
+    buildStatus = status;
+    renderHud();
   updateFeatureBuildStatus();
 });
 
@@ -606,6 +610,16 @@ function renderWorldTab(): void {
   );
   panel.appendChild(createInfoRow("World Size", String(draftConfig.worldSize)));
   panel.appendChild(
+    createButton("Retune For World Size", () => {
+      retuneDraftForWorldSize();
+      demo.setCollisionRadius(draftConfig.collisionRadius);
+      demo.setFoliageRadius(draftConfig.foliageRadius);
+      demo.setLodDistances(draftConfig.lodDistances);
+      demo.setWaterConfig(draftConfig.water);
+      renderPanel();
+    })
+  );
+  panel.appendChild(
     createSlider("Base Height", -64, 32, 1, draftConfig.baseHeight, (value) => {
       draftConfig.baseHeight = value;
     })
@@ -1029,13 +1043,23 @@ function updateFeatureBuildStatus(): void {
     `crossOriginIsolated: ${workerStatus.crossOriginIsolated}\n` +
     `SharedArrayBuffer: ${workerStatus.sharedArrayBufferDefined}\n` +
     `Snapshot Mode: ${workerStatus.snapshotMode}\n` +
+    `Live Terrain Systems: ${workerStatus.liveTerrainSystems}\n` +
+    `Chunks: ${workerStatus.chunkCount}\n` +
+    `Loaded Chunk Meshes: ${workerStatus.loadedChunkMeshes}\n` +
     `Mesh Apply: ${workerStatus.applyingChunkMeshes ? "active" : "idle"}\n` +
     `Pending Chunk Meshes: ${workerStatus.pendingChunkMeshes}`;
+  const buildProfile = demo.getBuildProfile();
+  const profileDetail =
+    `\nWorld Build: ${formatDuration(buildProfile.lastWorldBuildMs)}\n` +
+    `Terrain Swap: ${formatDuration(buildProfile.lastTerrainSwapMs)}\n` +
+    `Chunk Workers: ${formatDuration(buildProfile.lastChunkWorkerBuildMs)}\n` +
+    `Mesh Apply: ${formatDuration(buildProfile.lastMeshApplyMs)}\n` +
+    `Total Rebuild: ${formatDuration(buildProfile.lastTotalRebuildMs)}`;
   const progress =
     buildStatus.phase === "idle"
       ? ""
       : `\n${buildStatus.message}`;
-  featureBuildStatusText.textContent = `${summary}\n${workerLine}\n${workerDetail}${progress}`;
+  featureBuildStatusText.textContent = `${summary}\n${workerLine}\n${workerDetail}${profileDetail}${progress}`;
 }
 
 function createPoiDebugControls(): HTMLElement {
@@ -1523,6 +1547,16 @@ function formatValue(value: number, step: number): string {
   return step >= 1 ? String(value) : value.toFixed(getDecimalPlaces(step));
 }
 
+function formatDuration(valueMs: number): string {
+  if (valueMs <= 0) {
+    return "-";
+  }
+  if (valueMs < 1000) {
+    return `${Math.round(valueMs)} ms`;
+  }
+  return `${(valueMs / 1000).toFixed(2)} s`;
+}
+
 function getDecimalPlaces(step: number): number {
   const stepText = String(step);
   const dotIndex = stepText.indexOf(".");
@@ -1614,4 +1648,27 @@ function syncDraftWorldBounds(): void {
   draftConfig.worldSize = draftConfig.chunksPerAxis * draftConfig.chunkSize;
   draftConfig.worldMin = -draftConfig.worldSize * 0.5;
   draftConfig.worldMax = draftConfig.worldSize * 0.5;
+}
+
+function retuneDraftForWorldSize(): void {
+  const scale = Math.max(1, draftConfig.worldSize / 1024);
+  const sqrtScale = Math.sqrt(scale);
+  draftConfig.lodDistances = [
+    roundToNearest(clamp(160 * sqrtScale, 160, 420), 10),
+    roundToNearest(clamp(320 * sqrtScale, 320, 760), 10),
+    roundToNearest(clamp(520 * sqrtScale, 520, 1200), 10)
+  ];
+  draftConfig.collisionRadius = roundToNearest(clamp(220 * sqrtScale, 220, 820), 10);
+  draftConfig.foliageRadius = roundToNearest(clamp(700 * sqrtScale, 700, 2600), 10);
+  draftConfig.erosion.resolution = clampErosionResolution(257 * sqrtScale);
+  draftConfig.rivers.resolution = clampErosionResolution(257 * sqrtScale);
+  draftConfig.water.inlandMeshResolution = clampErosionResolution(257 * sqrtScale);
+}
+
+function roundToNearest(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

@@ -20,6 +20,7 @@ import { TerrainSystem, TerrainSystemBuildOptions } from "./terrain/TerrainSyste
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
 import { TerrainPoiDebugConfig, TerrainPoiStats } from "./terrain/TerrainPoiSystem";
 import { TerrainRoadStats } from "./terrain/TerrainRoadSystem";
+import { TerrainChunkBuildProfile } from "./terrain/TerrainSystem";
 import {
   TerrainDebugViewMode,
   TerrainLayerThresholds,
@@ -73,6 +74,7 @@ export interface TerrainDemo {
     listener: (status: TerrainBuildStatus) => void
   ) => () => void;
   readonly getWorkerStatus: () => TerrainWorkerStatus;
+  readonly getBuildProfile: () => TerrainBuildProfile;
 }
 
 export interface TerrainBuildStatus {
@@ -88,8 +90,19 @@ export interface TerrainWorkerStatus {
   readonly crossOriginIsolated: boolean;
   readonly sharedArrayBufferDefined: boolean;
   readonly snapshotMode: "shared" | "copied" | "main-thread";
+  readonly liveTerrainSystems: number;
+  readonly chunkCount: number;
+  readonly loadedChunkMeshes: number;
   readonly pendingChunkMeshes: number;
   readonly applyingChunkMeshes: boolean;
+}
+
+export interface TerrainBuildProfile {
+  readonly lastWorldBuildMs: number;
+  readonly lastTerrainSwapMs: number;
+  readonly lastChunkWorkerBuildMs: number;
+  readonly lastMeshApplyMs: number;
+  readonly lastTotalRebuildMs: number;
 }
 
 export function createTerrainDemo(
@@ -128,6 +141,13 @@ export function createTerrainDemo(
     message: "",
     completed: 0,
     total: 0
+  };
+  let buildProfile: TerrainBuildProfile = {
+    lastWorldBuildMs: 0,
+    lastTerrainSwapMs: 0,
+    lastChunkWorkerBuildMs: 0,
+    lastMeshApplyMs: 0,
+    lastTotalRebuildMs: 0
   };
   const buildStatusListeners = new Set<(status: TerrainBuildStatus) => void>();
 
@@ -212,6 +232,7 @@ export function createTerrainDemo(
     nextConfigOverrides: TerrainConfigOverrides,
     nextTextureOptions: TerrainTextureOptions
   ): Promise<void> => {
+    const rebuildStartedAt = performance.now();
     const wireframe = terrainSystem.getWireframe();
     const debugViewMode = terrainSystem.getDebugViewMode();
     const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
@@ -259,14 +280,17 @@ export function createTerrainDemo(
       completed: 0,
       total: 1
     });
+    const worldBuildStartedAt = performance.now();
     const prebuiltWorld = await buildCoordinator.buildWorld(
       nextConfig,
       nextBuildVersion
     );
+    const worldBuildDurationMs = performance.now() - worldBuildStartedAt;
     if (nextBuildVersion !== buildVersion) {
       return;
     }
 
+    const terrainSwapStartedAt = performance.now();
     terrainSystem.dispose();
     frameCameraToWorld(camera, nextConfig);
     terrainSystem = new TerrainSystem(
@@ -295,9 +319,18 @@ export function createTerrainDemo(
     terrainSystem.setDebugViewMode(debugViewMode);
     terrainSystem.update(camera.position);
     await terrainSystem.whenChunkMeshesReady();
+    const terrainSwapDurationMs = performance.now() - terrainSwapStartedAt;
     if (nextBuildVersion !== buildVersion) {
       return;
     }
+    const chunkProfile: TerrainChunkBuildProfile = terrainSystem.getChunkBuildProfile();
+    buildProfile = {
+      lastWorldBuildMs: worldBuildDurationMs,
+      lastTerrainSwapMs: terrainSwapDurationMs,
+      lastChunkWorkerBuildMs: chunkProfile.workerBuildMs,
+      lastMeshApplyMs: chunkProfile.meshApplyMs,
+      lastTotalRebuildMs: performance.now() - rebuildStartedAt
+    };
     setBuildStatus({
       phase: "idle",
       message: "",
@@ -376,9 +409,13 @@ export function createTerrainDemo(
         : sharedSnapshotsEnabled
           ? "shared"
           : "copied",
+      liveTerrainSystems: TerrainSystem.getLiveSystemCount(),
+      chunkCount: terrainSystem.getChunkCount(),
+      loadedChunkMeshes: terrainSystem.getLoadedChunkMeshCount(),
       pendingChunkMeshes: terrainSystem.getPendingChunkMeshCount(),
       applyingChunkMeshes: terrainSystem.isApplyingChunkMeshes()
-    })
+    }),
+    getBuildProfile: () => ({ ...buildProfile })
   };
 }
 

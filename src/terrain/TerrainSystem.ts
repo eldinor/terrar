@@ -43,6 +43,7 @@ import {
 } from "./materials";
 
 export class TerrainSystem {
+  private static liveSystemCount = 0;
   readonly config: TerrainConfig;
   private generator: ProceduralGenerator;
   private foliagePlanner: TerrainFoliagePlanner;
@@ -78,6 +79,8 @@ export class TerrainSystem {
   private pendingChunkMeshQueue: PendingChunkMeshBuild[] = [];
   private chunkMeshApplyPromise: Promise<void> | null = null;
   private chunkMeshApplyAbortController: AbortController | null = null;
+  private lastChunkBuildDurationMs = 0;
+  private lastChunkMeshApplyDurationMs = 0;
 
   constructor(
     private readonly scene: Scene,
@@ -86,6 +89,7 @@ export class TerrainSystem {
     private readonly prebuiltWorld: TerrainPrebuiltWorldData | null = null,
     private readonly buildOptions: TerrainSystemBuildOptions = {}
   ) {
+    TerrainSystem.liveSystemCount += 1;
     this.config = mergeTerrainConfig({
       ...DEFAULT_TERRAIN_CONFIG,
       ...overrides
@@ -260,7 +264,12 @@ export class TerrainSystem {
   }
 
   dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+
     this.disposed = true;
+    TerrainSystem.liveSystemCount = Math.max(0, TerrainSystem.liveSystemCount - 1);
     this.chunkMeshApplyAbortController?.abort();
     this.chunkMeshApplyAbortController = null;
     this.pendingChunkMeshQueue = [];
@@ -294,6 +303,25 @@ export class TerrainSystem {
 
   isApplyingChunkMeshes(): boolean {
     return this.chunkMeshApplyPromise !== null;
+  }
+
+  getChunkBuildProfile(): TerrainChunkBuildProfile {
+    return {
+      workerBuildMs: this.lastChunkBuildDurationMs,
+      meshApplyMs: this.lastChunkMeshApplyDurationMs
+    };
+  }
+
+  getChunkCount(): number {
+    return this.chunks.length;
+  }
+
+  getLoadedChunkMeshCount(): number {
+    return this.chunks.reduce((total, chunk) => total + chunk.getMeshCount(), 0);
+  }
+
+  static getLiveSystemCount(): number {
+    return TerrainSystem.liveSystemCount;
   }
 
   async createDebugOverlay(): Promise<void> {
@@ -555,10 +583,13 @@ export class TerrainSystem {
     }
 
     try {
+      const chunkBuildStartedAt = performance.now();
       this.chunkMeshApplyAbortController?.abort();
       this.chunkMeshApplyAbortController = new AbortController();
       this.pendingChunkMeshQueue = [];
       this.chunkMeshApplyPromise = null;
+      this.lastChunkBuildDurationMs = 0;
+      this.lastChunkMeshApplyDurationMs = 0;
       await coordinator.buildChunks(
         this.config,
         roads,
@@ -583,6 +614,7 @@ export class TerrainSystem {
           this.buildOptions.onChunkBuildProgress?.(progress);
         }
       );
+      this.lastChunkBuildDurationMs = performance.now() - chunkBuildStartedAt;
       await this.chunkMeshApplyPromise;
     } catch (error) {
       console.error("Chunk worker build failed, falling back to main-thread mesh generation.", error);
@@ -620,11 +652,13 @@ export class TerrainSystem {
 
     if (!this.chunkMeshApplyPromise) {
       const abortSignal = this.chunkMeshApplyAbortController?.signal;
+      const meshApplyStartedAt = performance.now();
       this.chunkMeshApplyPromise = runCoroutineAsync(
         this.applyPendingChunkMeshesCoroutine(),
         createYieldingScheduler(6),
         abortSignal
       ).finally(() => {
+        this.lastChunkMeshApplyDurationMs = performance.now() - meshApplyStartedAt;
         this.chunkMeshApplyPromise = null;
       });
     }
@@ -665,4 +699,9 @@ interface PendingChunkMeshBuild {
   readonly chunk: TerrainChunk;
   readonly lod: TerrainLODLevel;
   readonly meshData: TerrainChunkMeshData;
+}
+
+export interface TerrainChunkBuildProfile {
+  readonly workerBuildMs: number;
+  readonly meshApplyMs: number;
 }

@@ -86,6 +86,10 @@ export class TerrainChunk {
     });
   }
 
+  getMeshCount(): number {
+    return this.meshes.size;
+  }
+
   dispose(): void {
     this.meshes.forEach((mesh) => mesh.dispose(false, true));
     this.meshes.clear();

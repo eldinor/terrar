@@ -52,12 +52,10 @@ export class TerrainBuildCoordinator {
     config: TerrainConfig,
     buildVersion: number
   ): Promise<TerrainPrebuiltWorldData> {
-    if (!config.features.poi) {
-      return deserializeWorldBuildData(buildSerializedWorldData(config));
-    }
-
     if (!this.worker) {
-      return deserializeWorldBuildData(buildSerializedWorldData(config));
+      return deserializeWorldBuildData(
+        buildSerializedWorldData(config, this.preferSharedSnapshot)
+      );
     }
 
     const request: BuildWorldRequest = {

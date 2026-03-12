@@ -37,7 +37,8 @@ interface ActiveWorkerState {
 }
 
 export class TerrainChunkBuildCoordinator {
-  private readonly workers: ActiveWorkerState[];
+  private workers: ActiveWorkerState[];
+  private readonly workerCount: number;
   private activeBuildVersion = 0;
   private activeBuildHandlers:
     | {
@@ -57,25 +58,8 @@ export class TerrainChunkBuildCoordinator {
   private pendingReady = new Map<number, { remaining: number; resolve: () => void }>();
 
   constructor(workerCount = getDefaultWorkerCount()) {
-    const count = Math.max(1, workerCount);
-    this.workers = Array.from({ length: count }, () => {
-      const worker = new Worker(
-        new URL("./workers/chunkBuildWorker.ts", import.meta.url),
-        { type: "module" }
-      );
-      const state: ActiveWorkerState = {
-        worker,
-        ready: false,
-        currentJob: null
-      };
-      worker.onmessage = (event: MessageEvent<ChunkBuildWorkerResponse>) => {
-        this.handleWorkerMessage(state, event.data);
-      };
-      worker.onerror = (event) => {
-        this.failActiveBuild(new Error(event.message || "Chunk build worker failed."));
-      };
-      return state;
-    });
+    this.workerCount = Math.max(1, workerCount);
+    this.workers = this.createWorkerPool();
   }
 
   async buildChunks(
@@ -117,6 +101,7 @@ export class TerrainChunkBuildCoordinator {
 
     this.activeBuildHandlers?.resolve();
     this.activeBuildHandlers = null;
+    this.resetWorkers();
     await this.prepareWorkers(config, roads, snapshot, buildVersion);
 
     return new Promise<void>((resolve, reject) => {
@@ -139,7 +124,41 @@ export class TerrainChunkBuildCoordinator {
     this.pendingReady.clear();
     this.activeBuildHandlers?.resolve();
     this.activeBuildHandlers = null;
+    this.disposeWorkers();
+  }
+
+  private createWorkerPool(): ActiveWorkerState[] {
+    return Array.from({ length: this.workerCount }, () => this.createWorkerState());
+  }
+
+  private createWorkerState(): ActiveWorkerState {
+    const state: ActiveWorkerState = {
+      worker: new Worker(
+        new URL("./workers/chunkBuildWorker.ts", import.meta.url),
+        { type: "module" }
+      ),
+      ready: false,
+      currentJob: null
+    };
+    state.worker.onmessage = (event: MessageEvent<ChunkBuildWorkerResponse>) => {
+      this.handleWorkerMessage(state, event.data);
+    };
+    state.worker.onerror = (event) => {
+      this.failActiveBuild(new Error(event.message || "Chunk build worker failed."));
+    };
+    return state;
+  }
+
+  private resetWorkers(): void {
+    this.pendingReady.forEach(({ resolve }) => resolve());
+    this.pendingReady.clear();
+    this.disposeWorkers();
+    this.workers = this.createWorkerPool();
+  }
+
+  private disposeWorkers(): void {
     this.workers.forEach(({ worker }) => worker.terminate());
+    this.workers = [];
   }
 
   private async prepareWorkers(

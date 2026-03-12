@@ -15,7 +15,7 @@ import { TerrainFoliageCandidate, TerrainFoliagePlanner } from "./TerrainFoliage
 import { TerrainFoliageStats, TerrainFoliageSystem } from "./TerrainFoliageSystem";
 import { TerrainLODController } from "./TerrainLODController";
 import { TerrainMeshBuilder } from "./TerrainMeshBuilder";
-import { TerrainWaterSystem } from "./TerrainWaterSystem";
+import { TerrainWaterConfig, TerrainWaterSystem } from "./TerrainWaterSystem";
 import type { TerrainDebugOverlay } from "./TerrainDebugOverlay";
 import {
   cloneTerrainMaterialConfig,
@@ -231,6 +231,14 @@ export class TerrainSystem {
 
   getWaterLevel(): number {
     return this.waterSystem.getWaterLevel();
+  }
+
+  setWaterConfig(config: TerrainWaterConfig): void {
+    this.waterSystem.setConfig(config);
+  }
+
+  getWaterConfig(): TerrainWaterConfig {
+    return this.waterSystem.getConfig();
   }
 
   setCollisionRadius(radius: number): void {

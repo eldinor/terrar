@@ -12,7 +12,7 @@ export class TerrainChunk {
   readonly chunkZ: number;
   readonly centerHeight: number;
   private readonly meshes = new Map<TerrainLODLevel, Mesh>();
-  private activeLod: TerrainLODLevel = 3;
+  private activeLod: TerrainLODLevel | null = null;
   private collisionsEnabled = false;
 
   constructor(
@@ -44,7 +44,7 @@ export class TerrainChunk {
   }
 
   getLOD(): TerrainLODLevel {
-    return this.activeLod;
+    return this.activeLod ?? 3;
   }
 
   getCollisionEnabled(): boolean {
@@ -74,7 +74,7 @@ export class TerrainChunk {
   setCollision(enabled: boolean): void {
     this.collisionsEnabled = enabled;
     this.meshes.forEach((mesh, lod) => {
-      mesh.checkCollisions = enabled && lod === this.activeLod;
+        mesh.checkCollisions = enabled && lod === this.activeLod;
     });
   }
 

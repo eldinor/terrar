@@ -11,6 +11,7 @@ import {
   TerrainLayerThresholds,
   TerrainMaterialConfig
 } from "./terrain/materials";
+import { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
 
 export interface TerrainDemo {
   readonly engine: Engine;
@@ -21,6 +22,8 @@ export interface TerrainDemo {
   readonly toggleDebugOverlay: () => Promise<boolean>;
   readonly setWaterLevel: (level: number) => void;
   readonly getWaterLevel: () => number;
+  readonly setWaterConfig: (config: TerrainWaterConfig) => void;
+  readonly getWaterConfig: () => TerrainWaterConfig;
   readonly setCollisionRadius: (radius: number) => void;
   readonly getCollisionRadius: () => number;
   readonly setFoliageRadius: (radius: number) => void;
@@ -49,12 +52,12 @@ export function createTerrainDemo(
     "terrain-camera",
     -Math.PI / 4,
     Math.PI / 3.2,
-    900,
-    new Vector3(0, 40, 0),
+    1180,
+    new Vector3(0, 32, 0),
     scene
   );
   camera.lowerRadiusLimit = 140;
-  camera.upperRadiusLimit = 1400;
+  camera.upperRadiusLimit = 2000;
   camera.wheelDeltaPercentage = 0.01;
   camera.attachControl(canvas, true);
 
@@ -87,6 +90,8 @@ export function createTerrainDemo(
     toggleDebugOverlay: () => terrainSystem.toggleDebugOverlay(),
     setWaterLevel: (level: number) => terrainSystem.setWaterLevel(level),
     getWaterLevel: () => terrainSystem.getWaterLevel(),
+    setWaterConfig: (config: TerrainWaterConfig) => terrainSystem.setWaterConfig(config),
+    getWaterConfig: () => terrainSystem.getWaterConfig(),
     setCollisionRadius: (radius: number) => terrainSystem.setCollisionRadius(radius),
     getCollisionRadius: () => terrainSystem.getCollisionRadius(),
     setFoliageRadius: (radius: number) => terrainSystem.setFoliageRadius(radius),
@@ -107,6 +112,7 @@ export function createTerrainDemo(
       const wireframe = terrainSystem.getWireframe();
       const debugViewMode = terrainSystem.getDebugViewMode();
       const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
+      const waterConfig = terrainSystem.getWaterConfig();
       const config = terrainSystem.getConfig();
       const mergedOverrides: TerrainConfigOverrides = {
         ...config,
@@ -121,6 +127,7 @@ export function createTerrainDemo(
       terrainSystem.initialize();
       terrainSystem.setWireframe(wireframe);
       terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
+      terrainSystem.setWaterConfig(waterConfig);
       terrainSystem.setDebugViewMode(debugViewMode);
       terrainSystem.update(camera.position);
     },

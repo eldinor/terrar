@@ -1,4 +1,5 @@
 import type { TerrainConfigOverrides, TerrainShapeConfig } from "./terrain/TerrainConfig";
+import type { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
 import {
   TerrainDebugViewMode,
   TerrainLayerThresholds
@@ -75,6 +76,7 @@ canvas.id = "terrain-canvas";
 mount.appendChild(canvas);
 
 const demo = createTerrainDemo(canvas);
+type PanelTab = "runtime" | "material" | "world" | "presets";
 
 const hud = document.createElement("div");
 hud.style.position = "fixed";
@@ -96,7 +98,8 @@ panel.style.top = "72px";
 panel.style.left = "16px";
 panel.style.width = "320px";
 panel.style.maxHeight = "calc(100vh - 88px)";
-panel.style.overflow = "auto";
+panel.style.overflowY = "auto";
+panel.style.overflowX = "hidden";
 panel.style.padding = "12px";
 panel.style.border = "1px solid rgba(255, 255, 255, 0.18)";
 panel.style.borderRadius = "12px";
@@ -106,6 +109,7 @@ panel.style.font = "12px/1.45 Consolas, 'Courier New', monospace";
 panel.style.zIndex = "10";
 panel.style.userSelect = "none";
 panel.style.backdropFilter = "blur(8px)";
+panel.style.boxSizing = "border-box";
 document.body.appendChild(panel);
 
 let wireframe = false;
@@ -113,6 +117,7 @@ let debugVisible = false;
 let loadingDebug = false;
 let draftConfig = buildDraftConfig();
 let presetOptions = getPresetOptions();
+let activeTab: PanelTab = "runtime";
 
 function renderHud(): void {
   const debugState = loadingDebug ? "loading" : debugVisible ? "on" : "off";
@@ -156,14 +161,85 @@ function renderPanel(): void {
   panel.replaceChildren();
 
   panel.appendChild(createHeading("Terrain Tuning"));
-  panel.appendChild(createSectionLabel("Runtime"));
+  panel.appendChild(createTabBar());
 
+  if (activeTab === "runtime") {
+    renderRuntimeTab();
+    return;
+  }
+
+  if (activeTab === "material") {
+    renderMaterialTab();
+    return;
+  }
+
+  if (activeTab === "world") {
+    renderWorldTab();
+    return;
+  }
+
+  renderPresetsTab();
+}
+
+function renderRuntimeTab(): void {
+  panel.appendChild(createSectionLabel("Runtime"));
   panel.appendChild(
     createSlider("Water", -24, 32, 1, draftConfig.waterLevel, (value) => {
       draftConfig.waterLevel = value;
       demo.setWaterLevel(value);
     })
   );
+  panel.appendChild(
+    createSlider("Water Opacity", 0.1, 1, 0.01, draftConfig.water.opacity, (value) => {
+      draftConfig.water.opacity = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Shore Fade", 1, 32, 0.5, draftConfig.water.shoreFadeDistance, (value) => {
+      draftConfig.water.shoreFadeDistance = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Wave Scale X", 0.002, 0.05, 0.001, draftConfig.water.waveScaleX, (value) => {
+      draftConfig.water.waveScaleX = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Wave Scale Z", 0.002, 0.05, 0.001, draftConfig.water.waveScaleZ, (value) => {
+      draftConfig.water.waveScaleZ = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Wave Speed X", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedX, (value) => {
+      draftConfig.water.waveSpeedX = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Wave Speed Z", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedZ, (value) => {
+      draftConfig.water.waveSpeedZ = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(createWaterDebugControl());
+  panel.appendChild(
+    createColorInput("Shallow Color", draftConfig.water.shallowColor, (value) => {
+      draftConfig.water.shallowColor = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
+    createColorInput("Deep Color", draftConfig.water.deepColor, (value) => {
+      draftConfig.water.deepColor = value;
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(createDivider());
+  panel.appendChild(createSectionLabel("Camera Radius"));
   panel.appendChild(
     createSlider("Collision", 80, 480, 10, draftConfig.collisionRadius, (value) => {
       draftConfig.collisionRadius = value;
@@ -177,37 +253,57 @@ function renderPanel(): void {
     })
   );
   panel.appendChild(
-    createSlider("LOD0", 80, 280, 10, draftConfig.lodDistances[0], (value) => {
-      draftConfig.lodDistances[0] = value;
-      if (draftConfig.lodDistances[1] <= value) {
-        draftConfig.lodDistances[1] = value + 10;
+    createSlider(
+      "LOD0",
+      80,
+      280,
+      10,
+      draftConfig.lodDistances[0],
+      (value) => {
+        draftConfig.lodDistances[0] = value;
+        if (draftConfig.lodDistances[1] <= value) {
+          draftConfig.lodDistances[1] = value + 10;
+        }
+        if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
+          draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
+        }
+        demo.setLodDistances(draftConfig.lodDistances);
       }
-      if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
-        draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
-      }
-      demo.setLodDistances(draftConfig.lodDistances);
-      renderPanel();
-    })
+    )
   );
   panel.appendChild(
-    createSlider("LOD1", 160, 420, 10, draftConfig.lodDistances[1], (value) => {
-      draftConfig.lodDistances[1] = Math.max(value, draftConfig.lodDistances[0] + 10);
-      if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
-        draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
+    createSlider(
+      "LOD1",
+      160,
+      420,
+      10,
+      draftConfig.lodDistances[1],
+      (value) => {
+        draftConfig.lodDistances[1] = Math.max(value, draftConfig.lodDistances[0] + 10);
+        if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
+          draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
+        }
+        demo.setLodDistances(draftConfig.lodDistances);
       }
-      demo.setLodDistances(draftConfig.lodDistances);
-      renderPanel();
-    })
+    )
   );
   panel.appendChild(
-    createSlider("LOD2", 260, 700, 10, draftConfig.lodDistances[2], (value) => {
-      draftConfig.lodDistances[2] = Math.max(value, draftConfig.lodDistances[1] + 10);
-      demo.setLodDistances(draftConfig.lodDistances);
-      renderPanel();
-    })
+    createSlider(
+      "LOD2",
+      260,
+      700,
+      10,
+      draftConfig.lodDistances[2],
+      (value) => {
+        draftConfig.lodDistances[2] = Math.max(value, draftConfig.lodDistances[1] + 10);
+        demo.setLodDistances(draftConfig.lodDistances);
+      }
+    )
   );
   panel.appendChild(createDebugModeControl());
-  panel.appendChild(createDivider());
+}
+
+function renderMaterialTab(): void {
   panel.appendChild(createSectionLabel("Material Blend"));
   panel.appendChild(
     createSlider("Rock Start", 0.05, 0.9, 0.01, draftConfig.materialThresholds.rockSlopeStart, (value) => {
@@ -216,7 +312,6 @@ function renderPanel(): void {
         draftConfig.materialThresholds.rockSlopeFull - 0.02
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      renderPanel();
     })
   );
   panel.appendChild(
@@ -226,7 +321,6 @@ function renderPanel(): void {
         draftConfig.materialThresholds.rockSlopeStart + 0.02
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      renderPanel();
     })
   );
   panel.appendChild(
@@ -242,7 +336,6 @@ function renderPanel(): void {
         draftConfig.materialThresholds.snowFullHeight - 1
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      renderPanel();
     })
   );
   panel.appendChild(
@@ -252,7 +345,6 @@ function renderPanel(): void {
         draftConfig.materialThresholds.snowStartHeight + 1
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      renderPanel();
     })
   );
   panel.appendChild(
@@ -262,7 +354,6 @@ function renderPanel(): void {
         draftConfig.materialThresholds.dirtHighHeight - 1
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      renderPanel();
     })
   );
   panel.appendChild(
@@ -272,7 +363,6 @@ function renderPanel(): void {
         draftConfig.materialThresholds.dirtLowHeight + 1
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      renderPanel();
     })
   );
   panel.appendChild(
@@ -321,18 +411,17 @@ function renderPanel(): void {
     createSlider("Beach Start", 0, 8, 0.5, draftConfig.shorelineStartOffset, (value) => {
       draftConfig.shorelineStartOffset = Math.min(value, draftConfig.shorelineEndOffset - 0.5);
       applyDraftMaterialConfig();
-      renderPanel();
     })
   );
   panel.appendChild(
     createSlider("Beach End", 2, 40, 0.5, draftConfig.shorelineEndOffset, (value) => {
       draftConfig.shorelineEndOffset = Math.max(value, draftConfig.shorelineStartOffset + 0.5);
       applyDraftMaterialConfig();
-      renderPanel();
     })
   );
+}
 
-  panel.appendChild(createDivider());
+function renderWorldTab(): void {
   panel.appendChild(createSectionLabel("Regenerate"));
   panel.appendChild(createTextInput("Seed", draftConfig.seed, (value) => {
     draftConfig.seed = value.trim() === "" ? "1337" : value;
@@ -392,11 +481,56 @@ function renderPanel(): void {
       draftConfig.shape.detailFrequency = value;
     })
   );
-
   panel.appendChild(createDivider());
+  panel.appendChild(createActionButtons());
+}
+
+function renderPresetsTab(): void {
   panel.appendChild(createSectionLabel("Presets"));
   panel.appendChild(createPresetControls());
   panel.appendChild(createActionButtons());
+}
+
+function createTabBar(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.display = "grid";
+  wrap.style.gridTemplateColumns = "repeat(4, 1fr)";
+  wrap.style.gap = "6px";
+  wrap.style.marginTop = "10px";
+  wrap.style.width = "100%";
+  wrap.style.boxSizing = "border-box";
+
+  const tabs: readonly [PanelTab, string][] = [
+    ["runtime", "Runtime"],
+    ["material", "Material"],
+    ["world", "World"],
+    ["presets", "Presets"]
+  ];
+
+  tabs.forEach(([tab, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.style.padding = "7px 6px";
+    button.style.borderRadius = "8px";
+    button.style.border = "1px solid rgba(255,255,255,0.16)";
+    button.style.background =
+      activeTab === tab ? "rgba(56, 93, 123, 0.95)" : "rgba(18, 29, 39, 0.95)";
+    button.style.color = "#f4edc9";
+    button.style.cursor = "pointer";
+    button.style.minWidth = "0";
+    button.style.maxWidth = "100%";
+    button.style.whiteSpace = "nowrap";
+    button.style.overflow = "hidden";
+    button.style.textOverflow = "ellipsis";
+    button.addEventListener("click", () => {
+      activeTab = tab;
+      renderPanel();
+    });
+    wrap.appendChild(button);
+  });
+
+  return wrap;
 }
 
 function createPresetControls(): HTMLElement {
@@ -404,10 +538,14 @@ function createPresetControls(): HTMLElement {
   wrap.style.display = "grid";
   wrap.style.gap = "8px";
   wrap.style.marginTop = "8px";
+  wrap.style.width = "100%";
+  wrap.style.boxSizing = "border-box";
 
   const select = document.createElement("select");
   select.style.width = "100%";
+  select.style.maxWidth = "100%";
   select.style.padding = "6px 8px";
+  select.style.boxSizing = "border-box";
   select.style.borderRadius = "8px";
   select.style.border = "1px solid rgba(255,255,255,0.16)";
   select.style.background = "rgba(14, 21, 29, 0.95)";
@@ -424,6 +562,8 @@ function createPresetControls(): HTMLElement {
   buttons.style.display = "grid";
   buttons.style.gridTemplateColumns = "1fr 1fr";
   buttons.style.gap = "8px";
+  buttons.style.width = "100%";
+  buttons.style.boxSizing = "border-box";
 
   const apply = createButton("Apply Preset", () => {
     const preset = presetOptions[Number(select.value)];
@@ -459,13 +599,18 @@ function createDebugModeControl(): HTMLElement {
   row.style.display = "grid";
   row.style.gap = "4px";
   row.style.marginTop = "8px";
+  row.style.width = "100%";
+  row.style.minWidth = "0";
+  row.style.boxSizing = "border-box";
 
   const title = document.createElement("div");
   title.textContent = "Terrain View";
 
   const select = document.createElement("select");
   select.style.width = "100%";
+  select.style.maxWidth = "100%";
   select.style.padding = "6px 8px";
+  select.style.boxSizing = "border-box";
   select.style.borderRadius = "8px";
   select.style.border = "1px solid rgba(255,255,255,0.16)";
   select.style.background = "rgba(14, 21, 29, 0.95)";
@@ -521,12 +666,60 @@ function createActionButtons(): HTMLElement {
   return wrap;
 }
 
+function createWaterDebugControl(): HTMLElement {
+  const row = document.createElement("label");
+  row.style.display = "grid";
+  row.style.gap = "4px";
+  row.style.marginTop = "8px";
+  row.style.width = "100%";
+  row.style.minWidth = "0";
+  row.style.boxSizing = "border-box";
+
+  const title = document.createElement("div");
+  title.textContent = "Water Debug";
+
+  const select = document.createElement("select");
+  select.style.width = "100%";
+  select.style.maxWidth = "100%";
+  select.style.padding = "6px 8px";
+  select.style.boxSizing = "border-box";
+  select.style.borderRadius = "8px";
+  select.style.border = "1px solid rgba(255,255,255,0.16)";
+  select.style.background = "rgba(14, 21, 29, 0.95)";
+  select.style.color = "#f4edc9";
+
+  const modes: readonly [string, number][] = [
+    ["Final", 0],
+    ["Terrain Mask", 1],
+    ["Water Depth", 2],
+    ["Shore Fade", 3]
+  ];
+
+  modes.forEach(([label, value]) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = label;
+    option.selected = draftConfig.water.debugView === value;
+    select.appendChild(option);
+  });
+
+  select.addEventListener("change", () => {
+    draftConfig.water.debugView = Number(select.value);
+    applyDraftWaterConfig();
+  });
+
+  row.appendChild(title);
+  row.appendChild(select);
+  return row;
+}
+
 function applyDraftToWorld(): void {
   demo.rebuildTerrain(buildTerrainOverridesFromDraft());
   demo.setCollisionRadius(draftConfig.collisionRadius);
   demo.setFoliageRadius(draftConfig.foliageRadius);
   demo.setLodDistances(draftConfig.lodDistances);
   demo.setWaterLevel(draftConfig.waterLevel);
+  demo.setWaterConfig(draftConfig.water);
   applyDraftMaterialConfig();
   debugVisible = false;
   renderHud();
@@ -541,8 +734,7 @@ function applyDraftMaterialConfig(): void {
     ...config.scales,
     grassScale: draftConfig.materialScales.grassScale,
     dirtScale: draftConfig.materialScales.dirtScale,
-    sandScale: draftConfig.materialScales.sandScale
-    ,
+    sandScale: draftConfig.materialScales.sandScale,
     rockScale: draftConfig.materialScales.rockScale,
     snowScale: draftConfig.materialScales.snowScale,
     macroScale: draftConfig.materialScales.macroScale
@@ -553,6 +745,10 @@ function applyDraftMaterialConfig(): void {
   demo.setTerrainMaterialConfig(config);
 }
 
+function applyDraftWaterConfig(): void {
+  demo.setWaterConfig(draftConfig.water);
+}
+
 function buildDraftConfig(): DraftConfig {
   const config = demo.getTerrainConfig();
   return {
@@ -560,6 +756,7 @@ function buildDraftConfig(): DraftConfig {
     baseHeight: config.baseHeight,
     maxHeight: config.maxHeight,
     waterLevel: demo.getWaterLevel(),
+    water: { ...demo.getWaterConfig() },
     collisionRadius: demo.getCollisionRadius(),
     foliageRadius: demo.getFoliageRadius(),
     lodDistances: [...demo.getLodDistances()] as [number, number, number],
@@ -594,6 +791,7 @@ function mergeDraftWithOverrides(
     baseHeight: overrides.baseHeight ?? base.baseHeight,
     maxHeight: overrides.maxHeight ?? base.maxHeight,
     waterLevel: overrides.waterLevel ?? base.waterLevel,
+    water: { ...base.water },
     collisionRadius: overrides.collisionRadius ?? base.collisionRadius,
     foliageRadius: overrides.foliageRadius ?? base.foliageRadius,
     lodDistances: (overrides.lodDistances
@@ -670,6 +868,10 @@ function createButton(label: string, onClick: () => void): HTMLButtonElement {
   button.style.background = "rgba(18, 29, 39, 0.95)";
   button.style.color = "#f4edc9";
   button.style.cursor = "pointer";
+  button.style.width = "100%";
+  button.style.maxWidth = "100%";
+  button.style.minWidth = "0";
+  button.style.boxSizing = "border-box";
   button.addEventListener("click", onClick);
   return button;
 }
@@ -683,6 +885,9 @@ function createTextInput(
   row.style.display = "grid";
   row.style.gap = "4px";
   row.style.marginTop = "8px";
+  row.style.width = "100%";
+  row.style.minWidth = "0";
+  row.style.boxSizing = "border-box";
 
   const title = document.createElement("div");
   title.textContent = label;
@@ -691,12 +896,48 @@ function createTextInput(
   input.type = "text";
   input.value = initialValue;
   input.style.width = "100%";
+  input.style.maxWidth = "100%";
   input.style.padding = "6px 8px";
+  input.style.boxSizing = "border-box";
   input.style.borderRadius = "8px";
   input.style.border = "1px solid rgba(255,255,255,0.16)";
   input.style.background = "rgba(14, 21, 29, 0.95)";
   input.style.color = "#f4edc9";
   input.addEventListener("change", () => onChange(input.value));
+
+  row.appendChild(title);
+  row.appendChild(input);
+  return row;
+}
+
+function createColorInput(
+  label: string,
+  initialValue: string,
+  onChange: (value: string) => void
+): HTMLElement {
+  const row = document.createElement("label");
+  row.style.display = "grid";
+  row.style.gap = "4px";
+  row.style.marginTop = "8px";
+  row.style.width = "100%";
+  row.style.minWidth = "0";
+  row.style.boxSizing = "border-box";
+
+  const title = document.createElement("div");
+  title.textContent = label;
+
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = initialValue;
+  input.style.width = "100%";
+  input.style.height = "32px";
+  input.style.maxWidth = "100%";
+  input.style.padding = "2px";
+  input.style.boxSizing = "border-box";
+  input.style.borderRadius = "8px";
+  input.style.border = "1px solid rgba(255,255,255,0.16)";
+  input.style.background = "rgba(14, 21, 29, 0.95)";
+  input.addEventListener("input", () => onChange(input.value));
 
   row.appendChild(title);
   row.appendChild(input);
@@ -715,6 +956,9 @@ function createSlider(
   row.style.display = "grid";
   row.style.gap = "4px";
   row.style.marginTop = "8px";
+  row.style.width = "100%";
+  row.style.minWidth = "0";
+  row.style.boxSizing = "border-box";
 
   const title = document.createElement("div");
   title.textContent = `${label}: ${formatValue(initialValue, step)}`;
@@ -726,13 +970,14 @@ function createSlider(
   input.step = String(step);
   input.value = String(initialValue);
   input.style.width = "100%";
+  input.style.maxWidth = "100%";
+  input.style.boxSizing = "border-box";
 
   input.addEventListener("input", () => {
     const value = Number(input.value);
     title.textContent = `${label}: ${formatValue(value, step)}`;
     onInput(value);
   });
-
   row.appendChild(title);
   row.appendChild(input);
   return row;
@@ -753,6 +998,7 @@ interface DraftConfig {
   baseHeight: number;
   maxHeight: number;
   waterLevel: number;
+  water: MutableTerrainWaterConfig;
   collisionRadius: number;
   foliageRadius: number;
   lodDistances: [number, number, number];
@@ -773,4 +1019,8 @@ interface DraftConfig {
 
 type MutableTerrainShapeConfig = {
   -readonly [Key in keyof TerrainShapeConfig]: TerrainShapeConfig[Key];
+};
+
+type MutableTerrainWaterConfig = {
+  -readonly [Key in keyof TerrainWaterConfig]: TerrainWaterConfig[Key];
 };

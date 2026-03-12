@@ -14,11 +14,36 @@ const WATER_SHADER_NAME = "terrainWater";
 const WATER_SURFACE_OFFSET = 0.02;
 const WATER_MASK_RESOLUTION = 512;
 
+export interface TerrainWaterConfig {
+  readonly opacity: number;
+  readonly shoreFadeDistance: number;
+  readonly waveScaleX: number;
+  readonly waveScaleZ: number;
+  readonly waveSpeedX: number;
+  readonly waveSpeedZ: number;
+  readonly shallowColor: string;
+  readonly deepColor: string;
+  readonly debugView: number;
+}
+
+export const DEFAULT_TERRAIN_WATER_CONFIG: TerrainWaterConfig = Object.freeze({
+  opacity: 0.78,
+  shoreFadeDistance: 10,
+  waveScaleX: 0.012,
+  waveScaleZ: 0.018,
+  waveSpeedX: 0.04,
+  waveSpeedZ: -0.03,
+  shallowColor: "#53A6B8",
+  deepColor: "#1D5D78",
+  debugView: 0
+});
+
 export class TerrainWaterSystem {
   private mesh: Mesh | null = null;
   private material: ShaderMaterial | null = null;
   private terrainHeightTexture: RawTexture | null = null;
   private waterLevel: number;
+  private waterConfig: TerrainWaterConfig = { ...DEFAULT_TERRAIN_WATER_CONFIG };
 
   constructor(
     private readonly scene: Scene,
@@ -57,6 +82,19 @@ export class TerrainWaterSystem {
 
   getWaterLevel(): number {
     return this.waterLevel;
+  }
+
+  setConfig(config: TerrainWaterConfig): void {
+    this.waterConfig = { ...config };
+    if (!this.material) {
+      return;
+    }
+
+    this.applyConfigToMaterial(this.material, this.waterConfig);
+  }
+
+  getConfig(): TerrainWaterConfig {
+    return { ...this.waterConfig };
   }
 
   dispose(): void {
@@ -110,7 +148,8 @@ export class TerrainWaterSystem {
           "shoreFadeDistance",
           "waveScale",
           "waveSpeed",
-          "alpha"
+          "alpha",
+          "debugView"
         ],
         samplers: ["terrainHeightMap"],
         needAlphaBlending: true
@@ -124,17 +163,12 @@ export class TerrainWaterSystem {
 
     material.setFloat("time", 0);
     material.setVector3("cameraPosition", Vector3.Zero());
-    material.setColor3("waterColorDeep", Color3.FromHexString("#1D5D78"));
-    material.setColor3("waterColorShallow", Color3.FromHexString("#53A6B8"));
     material.setColor3("edgeTint", Color3.FromHexString("#D6F5FF"));
     material.setFloat("worldMin", this.config.worldMin);
     material.setFloat("worldSize", this.config.worldSize);
     material.setFloat("terrainBaseHeight", this.config.baseHeight);
     material.setFloat("terrainMaxHeight", this.config.maxHeight);
-    material.setFloat("shoreFadeDistance", 10);
-    material.setVector2("waveScale", new Vector2(0.012, 0.018));
-    material.setVector2("waveSpeed", new Vector2(0.04, -0.03));
-    material.setFloat("alpha", 0.78);
+    this.applyConfigToMaterial(material, this.waterConfig);
     if (this.terrainHeightTexture) {
       material.setTexture("terrainHeightMap", this.terrainHeightTexture);
     }
@@ -179,6 +213,25 @@ export class TerrainWaterSystem {
     texture.wrapU = Texture.CLAMP_ADDRESSMODE;
     texture.wrapV = Texture.CLAMP_ADDRESSMODE;
     return texture;
+  }
+
+  private applyConfigToMaterial(
+    material: ShaderMaterial,
+    config: TerrainWaterConfig
+  ): void {
+    material.setFloat("shoreFadeDistance", config.shoreFadeDistance);
+    material.setColor3("waterColorShallow", Color3.FromHexString(config.shallowColor));
+    material.setColor3("waterColorDeep", Color3.FromHexString(config.deepColor));
+    material.setVector2(
+      "waveScale",
+      new Vector2(config.waveScaleX, config.waveScaleZ)
+    );
+    material.setVector2(
+      "waveSpeed",
+      new Vector2(config.waveSpeedX, config.waveSpeedZ)
+    );
+    material.setFloat("alpha", config.opacity);
+    material.setInt("debugView", config.debugView);
   }
 }
 
@@ -227,6 +280,7 @@ function registerWaterShaders(): void {
     uniform vec2 waveScale;
     uniform vec2 waveSpeed;
     uniform float alpha;
+    uniform int debugView;
 
     float hash(vec2 p) {
       return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -276,6 +330,21 @@ function registerWaterShaders(): void {
       float shimmer = smoothstep(0.72, 0.98, wave);
       float shallowMix = smoothstep(0.0, 18.0, waterDepth);
       float shoreFade = smoothstep(0.0, shoreFadeDistance, waterDepth);
+
+      if (debugView == 1) {
+        gl_FragColor = vec4(vec3(terrainHeightSample), 1.0);
+        return;
+      }
+
+      if (debugView == 2) {
+        gl_FragColor = vec4(vec3(saturate(waterDepth / max(shoreFadeDistance, 0.001))), 1.0);
+        return;
+      }
+
+      if (debugView == 3) {
+        gl_FragColor = vec4(vec3(shoreFade), 1.0);
+        return;
+      }
 
       vec3 baseColor = mix(waterColorShallow, waterColorDeep, shallowMix);
       vec3 color = baseColor + edgeTint * (fresnel * 0.55 + shimmer * 0.12);

@@ -41,6 +41,11 @@ export interface TerrainRiverConfig {
   readonly minElevation: number;
 }
 
+export interface TerrainPoiConfig {
+  readonly density: number;
+  readonly spacing: number;
+}
+
 export interface TerrainConfig {
   readonly seed: number | string;
   readonly worldMin: number;
@@ -60,15 +65,20 @@ export interface TerrainConfig {
   readonly maxHeight: number;
   readonly erosion: TerrainErosionConfig;
   readonly rivers: TerrainRiverConfig;
+  readonly poi: TerrainPoiConfig;
   readonly shape: TerrainShapeConfig;
 }
 
 export type TerrainConfigOverrides = Partial<
-  Omit<TerrainConfig, "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers">
+  Omit<
+    TerrainConfig,
+    "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers" | "poi"
+  >
 > & {
   shape?: Partial<TerrainShapeConfig>;
   erosion?: Partial<TerrainErosionConfig>;
   rivers?: Partial<TerrainRiverConfig>;
+  poi?: Partial<TerrainPoiConfig>;
 };
 
 export const DEFAULT_TERRAIN_SHAPE_CONFIG: TerrainShapeConfig = Object.freeze({
@@ -110,6 +120,11 @@ export const DEFAULT_TERRAIN_RIVER_CONFIG: TerrainRiverConfig = Object.freeze({
   minElevation: 12
 });
 
+export const DEFAULT_TERRAIN_POI_CONFIG: TerrainPoiConfig = Object.freeze({
+  density: 0.8,
+  spacing: 1.1
+});
+
 export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   seed: 1337,
   worldMin: -512,
@@ -129,6 +144,7 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   maxHeight: 260,
   erosion: DEFAULT_TERRAIN_EROSION_CONFIG,
   rivers: DEFAULT_TERRAIN_RIVER_CONFIG,
+  poi: DEFAULT_TERRAIN_POI_CONFIG,
   shape: DEFAULT_TERRAIN_SHAPE_CONFIG
 });
 
@@ -149,6 +165,10 @@ export function mergeTerrainConfig(
   const rivers = Object.freeze({
     ...DEFAULT_TERRAIN_RIVER_CONFIG,
     ...overrides.rivers
+  });
+  const poi = Object.freeze({
+    ...DEFAULT_TERRAIN_POI_CONFIG,
+    ...overrides.poi
   });
   const shape = Object.freeze({
     ...DEFAULT_TERRAIN_SHAPE_CONFIG,
@@ -190,6 +210,7 @@ export function mergeTerrainConfig(
     maxHeight: overrides.maxHeight ?? DEFAULT_TERRAIN_CONFIG.maxHeight,
     erosion,
     rivers,
+    poi,
     shape
   });
 }

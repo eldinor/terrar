@@ -1001,6 +1001,12 @@ function buildSedimentField(
   const sediment = new Float32Array(heights.length);
   const transport = new Float32Array(heights.length);
   const sortedIndices = Array.from({ length: heights.length }, (_, index) => index);
+  const neighborOffsets: readonly [number, number][] = [
+    [0, -1],
+    [-1, 0],
+    [1, 0],
+    [0, 1]
+  ];
   sortedIndices.sort((a, b) => heights[b] - heights[a]);
 
   for (const index of sortedIndices) {
@@ -1027,7 +1033,53 @@ function buildSedimentField(
       0.12 + flatness * 0.42 + lakeDeposit * 0.36 + riverDeposit * 0.18
     );
     const deposited = carried * depositRatio;
-    sediment[receiver] += deposited;
+    const receiverX = receiver % resolution;
+    const receiverZ = Math.floor(receiver / resolution);
+    const centerDeposit = deposited * 0.62;
+    sediment[receiver] += centerDeposit;
+
+    const fringeDeposit = deposited - centerDeposit;
+    if (fringeDeposit > 0.0001) {
+      let totalNeighborWeight = 0;
+      const weights = new Float32Array(neighborOffsets.length);
+
+      neighborOffsets.forEach(([offsetX, offsetZ], neighborIndex) => {
+        const nx = receiverX + offsetX;
+        const nz = receiverZ + offsetZ;
+        if (nx < 0 || nz < 0 || nx >= resolution || nz >= resolution) {
+          return;
+        }
+
+        const index = nz * resolution + nx;
+        const neighborLake = lake[index];
+        const neighborRiver = river[index];
+        const neighborFlow = flow[index];
+        const weight =
+          0.35 +
+          neighborLake * 0.4 +
+          neighborRiver * 0.25 +
+          neighborFlow * 0.18;
+        weights[neighborIndex] = weight;
+        totalNeighborWeight += weight;
+      });
+
+      if (totalNeighborWeight > 0.0001) {
+        neighborOffsets.forEach(([offsetX, offsetZ], neighborIndex) => {
+          const weight = weights[neighborIndex];
+          if (weight <= 0) {
+            return;
+          }
+
+          const nx = receiverX + offsetX;
+          const nz = receiverZ + offsetZ;
+          const index = nz * resolution + nx;
+          sediment[index] += fringeDeposit * (weight / totalNeighborWeight);
+        });
+      } else {
+        sediment[receiver] += fringeDeposit;
+      }
+    }
+
     transport[receiver] += carried - deposited;
   }
 
@@ -1050,7 +1102,53 @@ function buildSedimentField(
     normalized[index] = Scalar.Clamp(base * 0.85 + channelBias, 0, 1);
   }
 
+  smoothScalarFieldInPlace(normalized, resolution, 2, 0.58);
   return normalized;
+}
+
+function smoothScalarFieldInPlace(
+  field: Float32Array,
+  resolution: number,
+  passes: number,
+  centerWeight: number
+): void {
+  const offsets: readonly [number, number, number][] = [
+    [0, 0, centerWeight],
+    [0, -1, 0.12],
+    [-1, 0, 0.12],
+    [1, 0, 0.12],
+    [0, 1, 0.12],
+    [-1, -1, 0.015],
+    [1, -1, 0.015],
+    [-1, 1, 0.015],
+    [1, 1, 0.015]
+  ];
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const next = new Float32Array(field.length);
+
+    for (let z = 0; z < resolution; z += 1) {
+      for (let x = 0; x < resolution; x += 1) {
+        let totalWeight = 0;
+        let total = 0;
+
+        offsets.forEach(([offsetX, offsetZ, weight]) => {
+          const nx = x + offsetX;
+          const nz = z + offsetZ;
+          if (nx < 0 || nz < 0 || nx >= resolution || nz >= resolution) {
+            return;
+          }
+
+          total += field[nz * resolution + nx] * weight;
+          totalWeight += weight;
+        });
+
+        next[z * resolution + x] = total / Math.max(totalWeight, 0.0001);
+      }
+    }
+
+    field.set(next);
+  }
 }
 
 class MinHeap {

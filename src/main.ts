@@ -4,8 +4,12 @@ import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TerrainConfig, TerrainConfigOverrides } from "./terrain/TerrainConfig";
+import { TerrainPoi } from "./terrain/TerrainPoiPlanner";
+import { TerrainRoad } from "./terrain/TerrainRoadPlanner";
 import { TerrainSystem } from "./terrain/TerrainSystem";
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
+import { TerrainPoiStats } from "./terrain/TerrainPoiSystem";
+import { TerrainRoadStats } from "./terrain/TerrainRoadSystem";
 import {
   TerrainDebugViewMode,
   TerrainLayerThresholds,
@@ -29,6 +33,12 @@ export interface TerrainDemo {
   readonly getCollisionRadius: () => number;
   readonly setFoliageRadius: (radius: number) => void;
   readonly getFoliageRadius: () => number;
+  readonly setShowFoliage: (enabled: boolean) => void;
+  readonly getShowFoliage: () => boolean;
+  readonly setShowPoi: (enabled: boolean) => void;
+  readonly getShowPoi: () => boolean;
+  readonly setShowRoads: (enabled: boolean) => void;
+  readonly getShowRoads: () => boolean;
   readonly setLodDistances: (distances: readonly [number, number, number]) => void;
   readonly getLodDistances: () => readonly [number, number, number];
   readonly setDebugViewMode: (mode: TerrainDebugViewMode) => void;
@@ -42,6 +52,10 @@ export interface TerrainDemo {
   readonly rebuildTerrain: (overrides: TerrainConfigOverrides) => void;
   readonly getTerrainConfig: () => TerrainConfig;
   readonly getFoliageStats: () => TerrainFoliageStats;
+  readonly getPoiSites: () => readonly TerrainPoi[];
+  readonly getPoiStats: () => TerrainPoiStats;
+  readonly getRoads: () => readonly TerrainRoad[];
+  readonly getRoadStats: () => TerrainRoadStats;
 }
 
 export function createTerrainDemo(
@@ -100,6 +114,12 @@ export function createTerrainDemo(
     getCollisionRadius: () => terrainSystem.getCollisionRadius(),
     setFoliageRadius: (radius: number) => terrainSystem.setFoliageRadius(radius),
     getFoliageRadius: () => terrainSystem.getFoliageRadius(),
+    setShowFoliage: (enabled: boolean) => terrainSystem.setShowFoliage(enabled),
+    getShowFoliage: () => terrainSystem.getShowFoliage(),
+    setShowPoi: (enabled: boolean) => terrainSystem.setShowPoi(enabled),
+    getShowPoi: () => terrainSystem.getShowPoi(),
+    setShowRoads: (enabled: boolean) => terrainSystem.setShowRoads(enabled),
+    getShowRoads: () => terrainSystem.getShowRoads(),
     setLodDistances: (distances: readonly [number, number, number]) =>
       terrainSystem.setLodDistances(distances),
     getLodDistances: () => terrainSystem.getLodDistances(),
@@ -124,6 +144,9 @@ export function createTerrainDemo(
       const waterConfig = terrainSystem.getWaterConfig();
       const collisionRadius = terrainSystem.getCollisionRadius();
       const foliageRadius = terrainSystem.getFoliageRadius();
+      const showFoliage = terrainSystem.getShowFoliage();
+      const showPoi = terrainSystem.getShowPoi();
+      const showRoads = terrainSystem.getShowRoads();
       const lodDistances = terrainSystem.getLodDistances();
       const config = terrainSystem.getConfig();
       terrainSystem.dispose();
@@ -132,6 +155,9 @@ export function createTerrainDemo(
       terrainSystem.setWireframe(wireframe);
       terrainSystem.setCollisionRadius(collisionRadius);
       terrainSystem.setFoliageRadius(foliageRadius);
+      terrainSystem.setShowFoliage(showFoliage);
+      terrainSystem.setShowPoi(showPoi);
+      terrainSystem.setShowRoads(showRoads);
       terrainSystem.setLodDistances(lodDistances);
       terrainSystem.setWaterLevel(waterLevel);
       terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
@@ -148,6 +174,9 @@ export function createTerrainDemo(
       const waterConfig = terrainSystem.getWaterConfig();
       const collisionRadius = terrainSystem.getCollisionRadius();
       const foliageRadius = terrainSystem.getFoliageRadius();
+      const showFoliage = terrainSystem.getShowFoliage();
+      const showPoi = terrainSystem.getShowPoi();
+      const showRoads = terrainSystem.getShowRoads();
       const lodDistances = terrainSystem.getLodDistances();
       const currentTextureOptions = terrainSystem.getTextureOptions();
       const config = terrainSystem.getConfig();
@@ -157,6 +186,10 @@ export function createTerrainDemo(
         erosion: {
           ...config.erosion,
           ...nextOverrides.erosion
+        },
+        poi: {
+          ...config.poi,
+          ...nextOverrides.poi
         },
         rivers: {
           ...config.rivers,
@@ -177,6 +210,9 @@ export function createTerrainDemo(
       terrainSystem.setFoliageRadius(
         nextOverrides.foliageRadius ?? foliageRadius
       );
+      terrainSystem.setShowFoliage(showFoliage);
+      terrainSystem.setShowPoi(showPoi);
+      terrainSystem.setShowRoads(showRoads);
       terrainSystem.setLodDistances(nextOverrides.lodDistances ?? lodDistances);
       terrainSystem.setWaterLevel(nextOverrides.waterLevel ?? waterLevel);
       terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
@@ -185,7 +221,11 @@ export function createTerrainDemo(
       terrainSystem.update(camera.position);
     },
     getTerrainConfig: () => terrainSystem.getConfig(),
-    getFoliageStats: () => terrainSystem.getFoliageStats()
+    getFoliageStats: () => terrainSystem.getFoliageStats(),
+    getPoiSites: () => terrainSystem.getPoiSites(),
+    getPoiStats: () => terrainSystem.getPoiStats(),
+    getRoads: () => terrainSystem.getRoads(),
+    getRoadStats: () => terrainSystem.getRoadStats()
   };
 }
 

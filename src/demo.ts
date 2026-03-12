@@ -1,6 +1,7 @@
 import type {
   TerrainConfigOverrides,
   TerrainErosionConfig,
+  TerrainPoiConfig,
   TerrainRiverConfig,
   TerrainShapeConfig
 } from "./terrain/TerrainConfig";
@@ -127,12 +128,15 @@ let activeTab: PanelTab = "runtime";
 function renderHud(): void {
   const debugState = loadingDebug ? "loading" : debugVisible ? "on" : "off";
   const foliage = demo.getFoliageStats();
+  const poi = demo.getPoiStats();
+  const roads = demo.getRoadStats();
   hud.textContent =
     `G debug: ${debugState} | V wireframe: ${wireframe ? "on" : "off"} | ` +
     `foliage: ${foliage.visibleInstances}/${foliage.totalInstances} ` +
     `(T ${foliage.visibleTrees}/${foliage.totalTrees}, ` +
     `B ${foliage.visibleBushes}/${foliage.totalBushes}, ` +
-    `R ${foliage.visibleRocks}/${foliage.totalRocks})`;
+    `R ${foliage.visibleRocks}/${foliage.totalRocks}) | ` +
+    `poi: ${poi.total} | roads: ${roads.totalRoads}`;
 }
 
 renderHud();
@@ -255,6 +259,12 @@ function renderRuntimeTab(): void {
     })
   );
   panel.appendChild(
+    createSlider("Inland Res", 33, 513, 32, draftConfig.water.inlandMeshResolution, (value) => {
+      draftConfig.water.inlandMeshResolution = clampErosionResolution(value);
+      applyDraftWaterConfig();
+    })
+  );
+  panel.appendChild(
     createSlider("Inland Smooth", 0, 6, 1, draftConfig.water.inlandSmoothingPasses, (value) => {
       draftConfig.water.inlandSmoothingPasses = value;
       applyDraftWaterConfig();
@@ -275,6 +285,28 @@ function renderRuntimeTab(): void {
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Camera Radius"));
+  panel.appendChild(
+    createCheckbox("Show POI", draftConfig.showPoi, (checked) => {
+      draftConfig.showPoi = checked;
+      demo.setShowPoi(checked);
+      renderHud();
+    })
+  );
+  panel.appendChild(createPoiStatsRow());
+  panel.appendChild(
+    createCheckbox("Show Roads", draftConfig.showRoads, (checked) => {
+      draftConfig.showRoads = checked;
+      demo.setShowRoads(checked);
+      renderHud();
+    })
+  );
+  panel.appendChild(
+    createCheckbox("Show Foliage", draftConfig.showFoliage, (checked) => {
+      draftConfig.showFoliage = checked;
+      demo.setShowFoliage(checked);
+      renderHud();
+    })
+  );
   panel.appendChild(
     createSlider("Collision", 80, 480, 10, draftConfig.collisionRadius, (value) => {
       draftConfig.collisionRadius = value;
@@ -467,6 +499,24 @@ function renderMaterialTab(): void {
     })
   );
   panel.appendChild(
+    createSlider("Small River Tint", 0, 1.5, 0.05, draftConfig.smallRiverTintStrength, (value) => {
+      draftConfig.smallRiverTintStrength = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Small River Bright", 0.5, 1.8, 0.05, draftConfig.smallRiverTintBrightness, (value) => {
+      draftConfig.smallRiverTintBrightness = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
+    createSlider("Small River Sat", 0, 1.8, 0.05, draftConfig.smallRiverTintSaturation, (value) => {
+      draftConfig.smallRiverTintSaturation = value;
+      applyDraftMaterialConfig();
+    })
+  );
+  panel.appendChild(
     createSlider("Beach Start", 0, 8, 0.5, draftConfig.shorelineStartOffset, (value) => {
       draftConfig.shorelineStartOffset = Math.min(value, draftConfig.shorelineEndOffset - 0.5);
       applyDraftMaterialConfig();
@@ -612,6 +662,18 @@ function renderWorldTab(): void {
   panel.appendChild(
     createSlider("Min Elevation", 0, 32, 1, draftConfig.rivers.minElevation, (value) => {
       draftConfig.rivers.minElevation = value;
+    })
+  );
+  panel.appendChild(createDivider());
+  panel.appendChild(createSectionLabel("POI"));
+  panel.appendChild(
+    createSlider("POI Density", 0.35, 1.5, 0.05, draftConfig.poi.density, (value) => {
+      draftConfig.poi.density = value;
+    })
+  );
+  panel.appendChild(
+    createSlider("POI Spacing", 0.7, 1.8, 0.05, draftConfig.poi.spacing, (value) => {
+      draftConfig.poi.spacing = value;
     })
   );
   panel.appendChild(createDivider());
@@ -763,7 +825,9 @@ function createDebugModeControl(): HTMLElement {
     ["Flow", TerrainDebugViewMode.Flow],
     ["River", TerrainDebugViewMode.River],
     ["Lake", TerrainDebugViewMode.Lake],
-    ["Sediment", TerrainDebugViewMode.Sediment]
+    ["Sediment", TerrainDebugViewMode.Sediment],
+    ["River Width", TerrainDebugViewMode.RiverWidth],
+    ["Water Transition", TerrainDebugViewMode.WaterTransition]
   ];
 
   modes.forEach(([label, value]) => {
@@ -834,6 +898,22 @@ function createActionButtons(): HTMLElement {
   return wrap;
 }
 
+function createPoiStatsRow(): HTMLElement {
+  const stats = demo.getPoiStats();
+  const row = document.createElement("div");
+  row.style.marginTop = "8px";
+  row.style.padding = "6px 8px";
+  row.style.borderRadius = "8px";
+  row.style.background = "rgba(14, 21, 29, 0.95)";
+  row.style.border = "1px solid rgba(255,255,255,0.1)";
+  row.style.color = "#9cb3c3";
+  row.style.whiteSpace = "pre-wrap";
+  row.textContent =
+    `POI ${stats.total}: V ${stats.villages} | H ${stats.harbors} | ` +
+    `F ${stats.hillforts} | M ${stats.mines}`;
+  return row;
+}
+
 function createWaterDebugControl(): HTMLElement {
   const row = document.createElement("label");
   row.style.display = "grid";
@@ -885,6 +965,9 @@ function applyDraftToWorld(): void {
   demo.rebuildTerrain(buildTerrainOverridesFromDraft());
   demo.setCollisionRadius(draftConfig.collisionRadius);
   demo.setFoliageRadius(draftConfig.foliageRadius);
+  demo.setShowFoliage(draftConfig.showFoliage);
+  demo.setShowPoi(draftConfig.showPoi);
+  demo.setShowRoads(draftConfig.showRoads);
   demo.setLodDistances(draftConfig.lodDistances);
   demo.setWaterLevel(draftConfig.waterLevel);
   demo.setWaterConfig(draftConfig.water);
@@ -913,6 +996,9 @@ function applyDraftMaterialConfig(): void {
   config.shorelineEndOffset = draftConfig.shorelineEndOffset;
   config.sedimentStrength = draftConfig.sedimentStrength;
   config.sedimentSandBias = draftConfig.sedimentSandBias;
+  config.smallRiverTintStrength = draftConfig.smallRiverTintStrength;
+  config.smallRiverTintBrightness = draftConfig.smallRiverTintBrightness;
+  config.smallRiverTintSaturation = draftConfig.smallRiverTintSaturation;
   demo.setTerrainMaterialConfig(config);
 }
 
@@ -931,6 +1017,9 @@ function buildDraftConfig(): DraftConfig {
     water: { ...demo.getWaterConfig() },
     collisionRadius: demo.getCollisionRadius(),
     foliageRadius: demo.getFoliageRadius(),
+    showFoliage: demo.getShowFoliage(),
+    showPoi: demo.getShowPoi(),
+    showRoads: demo.getShowRoads(),
     lodDistances: [...demo.getLodDistances()] as [number, number, number],
     materialThresholds: { ...demo.getTerrainMaterialThresholds() },
     materialScales: { ...demo.getTerrainMaterialConfig().scales },
@@ -939,7 +1028,13 @@ function buildDraftConfig(): DraftConfig {
     shorelineEndOffset: demo.getTerrainMaterialConfig().shorelineEndOffset,
     sedimentStrength: demo.getTerrainMaterialConfig().sedimentStrength,
     sedimentSandBias: demo.getTerrainMaterialConfig().sedimentSandBias,
+    smallRiverTintStrength: demo.getTerrainMaterialConfig().smallRiverTintStrength,
+    smallRiverTintBrightness:
+      demo.getTerrainMaterialConfig().smallRiverTintBrightness,
+    smallRiverTintSaturation:
+      demo.getTerrainMaterialConfig().smallRiverTintSaturation,
     erosion: { ...config.erosion },
+    poi: { ...config.poi },
     rivers: { ...config.rivers },
     shape: { ...config.shape }
   };
@@ -955,6 +1050,7 @@ function buildTerrainOverridesFromDraft(): TerrainConfigOverrides {
     foliageRadius: draftConfig.foliageRadius,
     lodDistances: draftConfig.lodDistances,
     erosion: { ...draftConfig.erosion },
+    poi: { ...draftConfig.poi },
     rivers: { ...draftConfig.rivers },
     shape: { ...draftConfig.shape }
   };
@@ -973,6 +1069,9 @@ function mergeDraftWithOverrides(
     water: { ...base.water },
     collisionRadius: overrides.collisionRadius ?? base.collisionRadius,
     foliageRadius: overrides.foliageRadius ?? base.foliageRadius,
+    showFoliage: base.showFoliage,
+    showPoi: base.showPoi,
+    showRoads: base.showRoads,
     lodDistances: (overrides.lodDistances
       ? [...overrides.lodDistances]
       : [...base.lodDistances]) as [number, number, number],
@@ -983,9 +1082,16 @@ function mergeDraftWithOverrides(
     shorelineEndOffset: base.shorelineEndOffset,
     sedimentStrength: base.sedimentStrength,
     sedimentSandBias: base.sedimentSandBias,
+    smallRiverTintStrength: base.smallRiverTintStrength,
+    smallRiverTintBrightness: base.smallRiverTintBrightness,
+    smallRiverTintSaturation: base.smallRiverTintSaturation,
     erosion: {
       ...base.erosion,
       ...overrides.erosion
+    },
+    poi: {
+      ...base.poi,
+      ...overrides.poi
     },
     rivers: {
       ...base.rivers,
@@ -1191,6 +1297,9 @@ interface DraftConfig {
   water: MutableTerrainWaterConfig;
   collisionRadius: number;
   foliageRadius: number;
+  showFoliage: boolean;
+  showPoi: boolean;
+  showRoads: boolean;
   lodDistances: [number, number, number];
   materialThresholds: TerrainLayerThresholds;
   materialScales: {
@@ -1207,7 +1316,11 @@ interface DraftConfig {
   shorelineEndOffset: number;
   sedimentStrength: number;
   sedimentSandBias: number;
+  smallRiverTintStrength: number;
+  smallRiverTintBrightness: number;
+  smallRiverTintSaturation: number;
   erosion: MutableTerrainErosionConfig;
+  poi: MutableTerrainPoiConfig;
   rivers: MutableTerrainRiverConfig;
   shape: MutableTerrainShapeConfig;
 }
@@ -1218,6 +1331,10 @@ type MutableTerrainShapeConfig = {
 
 type MutableTerrainErosionConfig = {
   -readonly [Key in keyof TerrainErosionConfig]: TerrainErosionConfig[Key];
+};
+
+type MutableTerrainPoiConfig = {
+  -readonly [Key in keyof TerrainPoiConfig]: TerrainPoiConfig[Key];
 };
 
 type MutableTerrainRiverConfig = {

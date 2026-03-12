@@ -25,6 +25,9 @@ export interface TerrainMaterialConfig {
   shorelineEndOffset: number;
   sedimentStrength: number;
   sedimentSandBias: number;
+  smallRiverTintStrength: number;
+  smallRiverTintBrightness: number;
+  smallRiverTintSaturation: number;
   blendSharpness: number;
   triplanarSharpness: number;
   normalStrength: number;
@@ -54,6 +57,9 @@ export const DEFAULT_TERRAIN_MATERIAL_CONFIG: TerrainMaterialConfig = Object.fre
   shorelineEndOffset: 16,
   sedimentStrength: 1,
   sedimentSandBias: 0.4,
+  smallRiverTintStrength: 1.05,
+  smallRiverTintBrightness: 1.15,
+  smallRiverTintSaturation: 1.1,
   blendSharpness: 1.2,
   triplanarSharpness: 4,
   normalStrength: 1,
@@ -83,7 +89,16 @@ export function createTerrainMaterialConfigForHeightRange(
     shorelineStartOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineStartOffset,
     shorelineEndOffset: DEFAULT_TERRAIN_MATERIAL_CONFIG.shorelineEndOffset,
     sedimentStrength: DEFAULT_TERRAIN_MATERIAL_CONFIG.sedimentStrength,
-    sedimentSandBias: DEFAULT_TERRAIN_MATERIAL_CONFIG.sedimentSandBias
+    sedimentSandBias: DEFAULT_TERRAIN_MATERIAL_CONFIG.sedimentSandBias,
+    smallRiverTintStrength: DEFAULT_TERRAIN_MATERIAL_CONFIG.smallRiverTintStrength,
+    smallRiverTintBrightness:
+      DEFAULT_TERRAIN_MATERIAL_CONFIG.smallRiverTintBrightness,
+    smallRiverTintSaturation:
+      DEFAULT_TERRAIN_MATERIAL_CONFIG.smallRiverTintSaturation,
+    blendSharpness: DEFAULT_TERRAIN_MATERIAL_CONFIG.blendSharpness,
+    triplanarSharpness: DEFAULT_TERRAIN_MATERIAL_CONFIG.triplanarSharpness,
+    normalStrength: DEFAULT_TERRAIN_MATERIAL_CONFIG.normalStrength,
+    debugMode: DEFAULT_TERRAIN_MATERIAL_CONFIG.debugMode
   };
 }
 
@@ -97,6 +112,9 @@ export function cloneTerrainMaterialConfig(
     shorelineEndOffset: config.shorelineEndOffset,
     sedimentStrength: config.sedimentStrength,
     sedimentSandBias: config.sedimentSandBias,
+    smallRiverTintStrength: config.smallRiverTintStrength,
+    smallRiverTintBrightness: config.smallRiverTintBrightness,
+    smallRiverTintSaturation: config.smallRiverTintSaturation,
     blendSharpness: config.blendSharpness,
     triplanarSharpness: config.triplanarSharpness,
     normalStrength: config.normalStrength,

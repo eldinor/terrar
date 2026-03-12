@@ -27,6 +27,7 @@ export interface TerrainWaterConfig {
   readonly riverMeshThreshold: number;
   readonly riverMeshMinWidth: number;
   readonly lakeMeshThreshold: number;
+  readonly inlandMeshResolution: number;
   readonly inlandSmoothingPasses: number;
   readonly debugView: number;
 }
@@ -44,8 +45,25 @@ export const DEFAULT_TERRAIN_WATER_CONFIG: TerrainWaterConfig = Object.freeze({
   riverMeshThreshold: 0.22,
   riverMeshMinWidth: 5,
   lakeMeshThreshold: 0.08,
+  inlandMeshResolution: 257,
   inlandSmoothingPasses: 2,
   debugView: 0
+});
+
+interface WaterMaterialStyle {
+  edgeTint: string;
+  shoreTint: string;
+  shoreTintStrength: number;
+  fresnelStrength: number;
+  glintStrength: number;
+}
+
+const DEFAULT_WATER_STYLE: WaterMaterialStyle = Object.freeze({
+  edgeTint: "#D6F5FF",
+  shoreTint: "#8ED7D8",
+  shoreTintStrength: 0.18,
+  fresnelStrength: 0.55,
+  glintStrength: 0.12
 });
 
 export class TerrainWaterSystem {
@@ -112,15 +130,16 @@ export class TerrainWaterSystem {
       previousConfig.riverMeshThreshold !== this.waterConfig.riverMeshThreshold ||
       previousConfig.riverMeshMinWidth !== this.waterConfig.riverMeshMinWidth ||
       previousConfig.lakeMeshThreshold !== this.waterConfig.lakeMeshThreshold ||
+      previousConfig.inlandMeshResolution !== this.waterConfig.inlandMeshResolution ||
       previousConfig.inlandSmoothingPasses !== this.waterConfig.inlandSmoothingPasses
     ) {
       this.rebuildInlandMeshes();
     } else {
       if (this.riverMaterial) {
-        this.applyConfigToMaterial(this.riverMaterial, this.getRiverConfig());
+        this.applyConfigToMaterial(this.riverMaterial, this.getRiverConfig(), this.getRiverStyle());
       }
       if (this.lakeMaterial) {
-        this.applyConfigToMaterial(this.lakeMaterial, this.getLakeConfig());
+        this.applyConfigToMaterial(this.lakeMaterial, this.getLakeConfig(), this.getLakeStyle());
       }
     }
   }
@@ -167,7 +186,7 @@ export class TerrainWaterSystem {
     inlandGrid: InlandWaterVertex[],
     kind: "river" | "lake"
   ): Mesh | null {
-    const resolution = Math.max(17, this.config.rivers.resolution | 0);
+    const resolution = this.resolveInlandResolution();
     const positions: number[] = [];
     const indices: number[] = [];
     const uvs: number[] = [];
@@ -340,7 +359,7 @@ export class TerrainWaterSystem {
       return;
     }
 
-    const inlandResolution = Math.max(17, this.config.rivers.resolution | 0);
+    const inlandResolution = this.resolveInlandResolution();
     const inlandGrid = this.createInlandWaterGrid(
       inlandResolution,
       this.config.worldSize / (inlandResolution - 1)
@@ -349,12 +368,20 @@ export class TerrainWaterSystem {
     this.lakeMesh = this.createInlandMesh(inlandGrid, "lake");
 
     if (this.riverMesh) {
-      this.riverMaterial = this.createMaterial("terrain-river-material", this.getRiverConfig());
+      this.riverMaterial = this.createMaterial(
+        "terrain-river-material",
+        this.getRiverConfig(),
+        this.getRiverStyle()
+      );
       this.riverMesh.material = this.riverMaterial;
     }
 
     if (this.lakeMesh) {
-      this.lakeMaterial = this.createMaterial("terrain-lake-material", this.getLakeConfig());
+      this.lakeMaterial = this.createMaterial(
+        "terrain-lake-material",
+        this.getLakeConfig(),
+        this.getLakeStyle()
+      );
       this.lakeMesh.material = this.lakeMaterial;
     }
   }
@@ -384,6 +411,16 @@ export class TerrainWaterSystem {
     };
   }
 
+  private getRiverStyle(): WaterMaterialStyle {
+    return {
+      edgeTint: "#CFEFFF",
+      shoreTint: "#6CB8C9",
+      shoreTintStrength: 0.16,
+      fresnelStrength: 0.52,
+      glintStrength: 0.16
+    };
+  }
+
   private getLakeConfig(): TerrainWaterConfig {
     return {
       ...this.waterConfig,
@@ -398,13 +435,24 @@ export class TerrainWaterSystem {
     };
   }
 
+  private getLakeStyle(): WaterMaterialStyle {
+    return {
+      edgeTint: "#CFE7F0",
+      shoreTint: "#A6D6C7",
+      shoreTintStrength: 0.34,
+      fresnelStrength: 0.34,
+      glintStrength: 0.05
+    };
+  }
+
   private toGridIndex(x: number, z: number, resolution: number): number {
     return z * resolution + x;
   }
 
   private createMaterial(
     name: string,
-    overrides: Partial<TerrainWaterConfig> = {}
+    overrides: Partial<TerrainWaterConfig> = {},
+    styleOverrides: Partial<WaterMaterialStyle> = {}
   ): ShaderMaterial {
     const runtimeConfig = {
       ...this.waterConfig,
@@ -427,6 +475,10 @@ export class TerrainWaterSystem {
           "waterColorDeep",
           "waterColorShallow",
           "edgeTint",
+          "shoreTintColor",
+          "shoreTintStrength",
+          "fresnelStrength",
+          "glintStrength",
           "worldMin",
           "worldSize",
           "terrainBaseHeight",
@@ -449,12 +501,14 @@ export class TerrainWaterSystem {
 
     material.setFloat("time", 0);
     material.setVector3("cameraPosition", Vector3.Zero());
-    material.setColor3("edgeTint", Color3.FromHexString("#D6F5FF"));
     material.setFloat("worldMin", this.config.worldMin);
     material.setFloat("worldSize", this.config.worldSize);
     material.setFloat("terrainBaseHeight", this.config.baseHeight);
     material.setFloat("terrainMaxHeight", this.config.maxHeight);
-    this.applyConfigToMaterial(material, runtimeConfig);
+    this.applyConfigToMaterial(material, runtimeConfig, {
+      ...DEFAULT_WATER_STYLE,
+      ...styleOverrides
+    });
     if (this.terrainHeightTexture) {
       material.setTexture("terrainHeightMap", this.terrainHeightTexture);
     }
@@ -503,11 +557,17 @@ export class TerrainWaterSystem {
 
   private applyConfigToMaterial(
     material: ShaderMaterial,
-    config: TerrainWaterConfig
+    config: TerrainWaterConfig,
+    style: WaterMaterialStyle = DEFAULT_WATER_STYLE
   ): void {
     material.setFloat("shoreFadeDistance", config.shoreFadeDistance);
     material.setColor3("waterColorShallow", Color3.FromHexString(config.shallowColor));
     material.setColor3("waterColorDeep", Color3.FromHexString(config.deepColor));
+    material.setColor3("edgeTint", Color3.FromHexString(style.edgeTint));
+    material.setColor3("shoreTintColor", Color3.FromHexString(style.shoreTint));
+    material.setFloat("shoreTintStrength", style.shoreTintStrength);
+    material.setFloat("fresnelStrength", style.fresnelStrength);
+    material.setFloat("glintStrength", style.glintStrength);
     material.setVector2(
       "waveScale",
       new Vector2(config.waveScaleX, config.waveScaleZ)
@@ -518,6 +578,12 @@ export class TerrainWaterSystem {
     );
     material.setFloat("alpha", config.opacity);
     material.setInt("debugView", config.debugView);
+  }
+
+  private resolveInlandResolution(): number {
+    const rounded = Math.round(this.waterConfig.inlandMeshResolution);
+    const clamped = Math.max(17, Math.min(513, rounded));
+    return clamped % 2 === 0 ? clamped + 1 : clamped;
   }
 }
 
@@ -715,6 +781,10 @@ function registerWaterShaders(): void {
     uniform vec3 waterColorDeep;
     uniform vec3 waterColorShallow;
     uniform vec3 edgeTint;
+    uniform vec3 shoreTintColor;
+    uniform float shoreTintStrength;
+    uniform float fresnelStrength;
+    uniform float glintStrength;
     uniform sampler2D terrainHeightMap;
     uniform float worldMin;
     uniform float worldSize;
@@ -774,6 +844,7 @@ function registerWaterShaders(): void {
       float shimmer = smoothstep(0.72, 0.98, wave);
       float shallowMix = smoothstep(0.0, 18.0, waterDepth);
       float shoreFade = smoothstep(0.0, shoreFadeDistance, waterDepth);
+      float shoreBand = (1.0 - shallowMix) * shoreFade;
 
       if (debugView == 1) {
         gl_FragColor = vec4(vec3(terrainHeightSample), 1.0);
@@ -791,7 +862,8 @@ function registerWaterShaders(): void {
       }
 
       vec3 baseColor = mix(waterColorShallow, waterColorDeep, shallowMix);
-      vec3 color = baseColor + edgeTint * (fresnel * 0.55 + shimmer * 0.12);
+      vec3 color = mix(baseColor, shoreTintColor, shoreBand * shoreTintStrength);
+      color += edgeTint * (fresnel * fresnelStrength + shimmer * glintStrength);
 
       gl_FragColor = vec4(color, alpha * max(shoreFade, 0.18));
     }

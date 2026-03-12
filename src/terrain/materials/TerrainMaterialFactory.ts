@@ -3,7 +3,7 @@ import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import {
   cloneTerrainMaterialConfig,
@@ -43,6 +43,13 @@ export class TerrainMaterialFactory {
         "ambientColor",
         "lightColor",
         "waterLevel",
+        "riverBankStrength",
+        "riverDischargeStrength",
+        "riverMeshThreshold",
+        "riverMeshMinWidth",
+        "roadMaskWorldMin",
+        "roadMaskWorldSize",
+        "roadTintStrength",
         "grassScale",
         "dirtScale",
         "sandScale",
@@ -61,13 +68,23 @@ export class TerrainMaterialFactory {
         "shorelineEndOffset",
         "sedimentStrength",
         "sedimentSandBias",
+        "smallRiverTintStrength",
+        "smallRiverTintBrightness",
+        "smallRiverTintSaturation",
         "blendSharpness",
         "triplanarSharpness",
         "normalStrength",
         "debugMode",
         "heightDebugMax"
       ],
-      samplers: ["grassAlbedo", "dirtAlbedo", "sandAlbedo", "rockAlbedo", "snowAlbedo"]
+      samplers: [
+        "grassAlbedo",
+        "dirtAlbedo",
+        "sandAlbedo",
+        "rockAlbedo",
+        "snowAlbedo",
+        "roadMask"
+      ]
     });
 
     material.backFaceCulling = false;
@@ -83,6 +100,14 @@ export class TerrainMaterialFactory {
     material.setColor3("ambientColor", new Color3(0.4, 0.43, 0.48));
     material.setColor3("lightColor", new Color3(1, 0.97, 0.92));
     material.setFloat("waterLevel", 0);
+    material.setFloat("riverBankStrength", 0.54);
+    material.setFloat("riverDischargeStrength", 1);
+    material.setFloat("riverMeshThreshold", 0.22);
+    material.setFloat("riverMeshMinWidth", 5);
+    material.setVector2("roadMaskWorldMin", new Vector2(-512, -512));
+    material.setVector2("roadMaskWorldSize", new Vector2(1024, 1024));
+    material.setFloat("roadTintStrength", 0.5);
+    material.setTexture("roadMask", createBlackMaskTexture(scene));
 
     this.applyConfig(material, config);
     return material;
@@ -111,6 +136,15 @@ export class TerrainMaterialFactory {
     material.setFloat("shorelineEndOffset", config.shorelineEndOffset);
     material.setFloat("sedimentStrength", config.sedimentStrength);
     material.setFloat("sedimentSandBias", config.sedimentSandBias);
+    material.setFloat("smallRiverTintStrength", config.smallRiverTintStrength);
+    material.setFloat(
+      "smallRiverTintBrightness",
+      config.smallRiverTintBrightness
+    );
+    material.setFloat(
+      "smallRiverTintSaturation",
+      config.smallRiverTintSaturation
+    );
     material.setFloat("blendSharpness", config.blendSharpness);
     material.setFloat("triplanarSharpness", config.triplanarSharpness);
     material.setFloat("normalStrength", config.normalStrength);
@@ -141,6 +175,40 @@ export class TerrainMaterialFactory {
 
   static setWaterLevel(material: ShaderMaterial, waterLevel: number): void {
     material.setFloat("waterLevel", waterLevel);
+  }
+
+  static setRiverRenderingParams(
+    material: ShaderMaterial,
+    params: {
+      bankStrength: number;
+      dischargeStrength: number;
+      meshThreshold: number;
+      meshMinWidth: number;
+    }
+  ): void {
+    material.setFloat("riverBankStrength", params.bankStrength);
+    material.setFloat("riverDischargeStrength", params.dischargeStrength);
+    material.setFloat("riverMeshThreshold", params.meshThreshold);
+    material.setFloat("riverMeshMinWidth", params.meshMinWidth);
+  }
+
+  static setRoadMask(
+    material: ShaderMaterial,
+    roadMask: Texture | null
+  ): void {
+    material.setTexture(
+      "roadMask",
+      roadMask ?? createBlackMaskTexture(material.getScene())
+    );
+  }
+
+  static setRoadMaskBounds(
+    material: ShaderMaterial,
+    worldMin: { x: number; z: number },
+    worldSize: { x: number; z: number }
+  ): void {
+    material.setVector2("roadMaskWorldMin", new Vector2(worldMin.x, worldMin.z));
+    material.setVector2("roadMaskWorldSize", new Vector2(worldSize.x, worldSize.z));
   }
 
   private static createDefaultTextureSet(
@@ -310,11 +378,19 @@ function ensureTerrainBlendShadersRegistered(): void {
     uniform sampler2D sandAlbedo;
     uniform sampler2D rockAlbedo;
     uniform sampler2D snowAlbedo;
+    uniform sampler2D roadMask;
 
     uniform vec3 lightDirection;
     uniform vec3 ambientColor;
     uniform vec3 lightColor;
     uniform float waterLevel;
+    uniform float riverBankStrength;
+    uniform float riverDischargeStrength;
+    uniform float riverMeshThreshold;
+    uniform float riverMeshMinWidth;
+    uniform vec2 roadMaskWorldMin;
+    uniform vec2 roadMaskWorldSize;
+    uniform float roadTintStrength;
 
     uniform float grassScale;
     uniform float dirtScale;
@@ -334,6 +410,9 @@ function ensureTerrainBlendShadersRegistered(): void {
     uniform float shorelineEndOffset;
     uniform float sedimentStrength;
     uniform float sedimentSandBias;
+    uniform float smallRiverTintStrength;
+    uniform float smallRiverTintBrightness;
+    uniform float smallRiverTintSaturation;
     uniform float blendSharpness;
     uniform float triplanarSharpness;
     uniform float normalStrength;
@@ -395,6 +474,11 @@ function ensureTerrainBlendShadersRegistered(): void {
       return blend / max(blend.x + blend.y + blend.z, 0.0001);
     }
 
+    vec3 adjustSaturation(vec3 color, float saturation) {
+      float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+      return mix(vec3(luma), color, saturation);
+    }
+
     void main(void) {
       vec3 normalW = normalize(vWorldNormal);
       float slope = 1.0 - saturate(normalW.y);
@@ -410,6 +494,34 @@ function ensureTerrainBlendShadersRegistered(): void {
       float openRiver = smoothstep(0.2, 0.55, river);
       float openLake = smoothstep(0.08, 0.32, lake);
       float inlandWater = max(openRiver, openLake);
+      float riverWidthFactor =
+        max(0.15, riverBankStrength) * 0.8 +
+        riverDischargeStrength * 0.35;
+      float riverWidthHint =
+        1.5 +
+        max(river, flow * 0.9) * 10.5 * riverWidthFactor;
+      vec2 roadUv = clamp(
+        (vWorldPos.xz - roadMaskWorldMin) / max(roadMaskWorldSize, vec2(0.0001)),
+        0.0,
+        1.0
+      );
+      float roadMaskValue = texture2D(roadMask, vec2(roadUv.x, 1.0 - roadUv.y)).r;
+      float meshTransition =
+        smoothstep(
+          max(0.0, riverMeshMinWidth - 1.2),
+          riverMeshMinWidth + 1.2,
+          riverWidthHint
+        ) *
+        smoothstep(
+          riverMeshThreshold * 0.7,
+          riverMeshThreshold + 0.08,
+          river
+        );
+      float narrowDeepRiver =
+        (1.0 - smoothstep(riverMeshMinWidth - 0.8, riverMeshMinWidth, riverWidthHint)) *
+        smoothstep(0.2, 0.48, river) *
+        smoothstep(0.08, 0.22, flow) *
+        (1.0 - openLake);
       float rock = smoothstep(rockSlopeStart, rockSlopeFull, materialSlope);
       float snow = smoothstep(snowStartHeight, snowFullHeight, height);
       float grassSlopeFavor = 1.0 - smoothstep(grassMaxSlope * 0.35, grassMaxSlope, materialSlope);
@@ -460,6 +572,18 @@ function ensureTerrainBlendShadersRegistered(): void {
       vec4 dirtCol = samplePlanarXZ(dirtAlbedo, vWorldPos, dirtScale);
       dirtCol.rgb *= mix(vec3(0.9, 0.86, 0.8), vec3(1.08, 1.02, 0.94), macroNoiseB);
       dirtCol.rgb *= mix(vec3(0.96, 0.9, 0.82), vec3(0.54, 0.44, 0.34), channelMask * 0.7);
+      vec3 smallRiverColor =
+        dirtCol.rgb * vec3(0.16, 0.3, 0.56) +
+        vec3(0.1, 0.24, 0.38);
+      smallRiverColor = adjustSaturation(
+        smallRiverColor,
+        smallRiverTintSaturation
+      ) * smallRiverTintBrightness;
+      dirtCol.rgb = mix(
+        dirtCol.rgb,
+        clamp(smallRiverColor, 0.0, 1.6),
+        saturate(narrowDeepRiver * smallRiverTintStrength) * (1.0 - meshTransition)
+      );
 
       vec4 rockCol = sampleTriplanar(rockAlbedo, vWorldPos, normalW, rockScale, triplanarSharpness);
       rockCol.rgb *= mix(vec3(0.86, 0.88, 0.9), vec3(1.06, 1.04, 1.02), macroMask);
@@ -485,6 +609,9 @@ function ensureTerrainBlendShadersRegistered(): void {
       dirt += flow * 0.08 * (1.0 - sand);
       dirt += wetRiver * 0.18 + openLake * 0.16;
       dirt += floodplain * 0.24;
+      grass *= 1.0 - roadMaskValue * 0.82;
+      dirt += roadMaskValue * 0.28;
+      sand += roadMaskValue * 0.06;
       grass *= 1.0 - (wetRiver * 0.62 + openLake * 0.82);
       sand *= 1.0 - (wetRiver * 0.38 + openLake * 0.22);
       sand += floodplain * mix(0.08, 0.4, sedimentSandBias) * (0.72 + shoreHeight * 0.55);
@@ -510,6 +637,18 @@ function ensureTerrainBlendShadersRegistered(): void {
         snowCol * snow;
       finalCol.rgb = mix(finalCol.rgb, finalCol.rgb * vec3(0.62, 0.72, 0.78) + wetTint, max(wetRiver, openLake * 0.6) * 0.42);
       finalCol.rgb = mix(finalCol.rgb, finalCol.rgb * vec3(0.34, 0.48, 0.58) + openWaterTint, inlandWater * 0.5);
+      float roadBlend =
+        saturate(roadMaskValue * roadTintStrength) *
+        (1.0 - openLake) *
+        (1.0 - smoothstep(0.4, 0.92, snow)) *
+        (1.0 - smoothstep(0.45, 0.95, rock));
+      vec3 roadColor = mix(vec3(0.34, 0.27, 0.16), vec3(0.5, 0.4, 0.24), macroMask);
+      finalCol.rgb = mix(finalCol.rgb, roadColor, roadBlend);
+      finalCol.rgb = mix(
+        finalCol.rgb,
+        finalCol.rgb * vec3(0.48, 0.62, 0.74) + vec3(0.02, 0.08, 0.12),
+        meshTransition * 0.18 * (1.0 - openLake)
+      );
 
       if (debugMode == 1) {
         finalCol = vec4(vec3(grass), 1.0);
@@ -537,6 +676,17 @@ function ensureTerrainBlendShadersRegistered(): void {
         finalCol = vec4(mix(vec3(0.04, 0.03, 0.02), vec3(0.16, 0.66, 1.0), lake), 1.0);
       } else if (debugMode == 13) {
         finalCol = vec4(mix(vec3(0.04, 0.03, 0.02), vec3(0.94, 0.82, 0.46), sediment), 1.0);
+      } else if (debugMode == 14) {
+        finalCol = vec4(vec3(saturate(riverWidthHint / max(riverMeshMinWidth * 2.0, 1.0))), 1.0);
+      } else if (debugMode == 15) {
+        finalCol = vec4(
+          mix(
+            vec3(0.05, 0.05, 0.06),
+            vec3(0.08, 0.72, 1.0),
+            meshTransition
+          ),
+          1.0
+        );
       } else {
         float diffuse = max(dot(normalW, normalize(lightDirection)), 0.0);
         float wrappedDiffuse = diffuse * 0.75 + 0.25;
@@ -577,6 +727,22 @@ function createLayerTexture(
   );
   texture.wrapU = Texture.WRAP_ADDRESSMODE;
   texture.wrapV = Texture.WRAP_ADDRESSMODE;
+  return texture;
+}
+
+function createBlackMaskTexture(scene: Scene): Texture {
+  const data = new Uint8Array([0, 0, 0, 255]);
+  const texture = RawTexture.CreateRGBATexture(
+    data,
+    1,
+    1,
+    scene,
+    false,
+    false,
+    Texture.NEAREST_SAMPLINGMODE
+  );
+  texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+  texture.wrapV = Texture.CLAMP_ADDRESSMODE;
   return texture;
 }
 

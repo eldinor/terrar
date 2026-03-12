@@ -8,6 +8,8 @@ import {
   TerrainLODLevel
 } from "../src/terrain/TerrainConfig";
 import { TerrainFoliagePlanner } from "../src/terrain/TerrainFoliagePlanner";
+import { TerrainPoiPlanner } from "../src/terrain/TerrainPoiPlanner";
+import { TerrainRoadPlanner } from "../src/terrain/TerrainRoadPlanner";
 import {
   computeTerrainLayerWeights,
   DEFAULT_TERRAIN_MATERIAL_CONFIG
@@ -301,6 +303,54 @@ describe("Foliage planning", () => {
     expect(total).toBeGreaterThan(0);
     expect(bushes).toBeGreaterThan(0);
     expect(rocks).toBeGreaterThan(0);
+  });
+});
+
+describe("POI planning", () => {
+  it("produces deterministic POI sites for the same seed", () => {
+    const config = mergeTerrainConfig({ seed: "poi-seed" });
+    const generator = new ProceduralGenerator(config);
+    const plannerA = new TerrainPoiPlanner(config, generator);
+    const plannerB = new TerrainPoiPlanner(config, generator);
+
+    expect(plannerA.generateSites()).toEqual(plannerB.generateSites());
+  });
+
+  it("produces non-zero POI sites for the default world", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+
+    const sites = planner.generateSites();
+
+    expect(sites.length).toBeGreaterThan(0);
+    expect(new Set(sites.map((site) => site.kind)).size).toBeGreaterThan(1);
+  });
+});
+
+describe("Road planning", () => {
+  it("produces deterministic road routes for the same seed", () => {
+    const config = mergeTerrainConfig({ seed: "road-seed" });
+    const generator = new ProceduralGenerator(config);
+    const poiPlanner = new TerrainPoiPlanner(config, generator);
+    const roadsA = new TerrainRoadPlanner(config, generator).generateRoads(
+      poiPlanner.generateSites()
+    );
+    const roadsB = new TerrainRoadPlanner(config, generator).generateRoads(
+      poiPlanner.generateSites()
+    );
+
+    expect(roadsA).toEqual(roadsB);
+  });
+
+  it("produces non-zero roads for the default world", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const pois = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator).generateSites();
+    const roads = new TerrainRoadPlanner(DEFAULT_TERRAIN_CONFIG, generator).generateRoads(
+      pois
+    );
+
+    expect(roads.length).toBeGreaterThan(0);
+    expect(roads.some((road) => road.points.length >= 2)).toBe(true);
   });
 });
 

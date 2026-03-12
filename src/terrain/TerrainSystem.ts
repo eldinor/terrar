@@ -15,6 +15,10 @@ import { TerrainFoliageCandidate, TerrainFoliagePlanner } from "./TerrainFoliage
 import { TerrainFoliageStats, TerrainFoliageSystem } from "./TerrainFoliageSystem";
 import { TerrainLODController } from "./TerrainLODController";
 import { TerrainMeshBuilder } from "./TerrainMeshBuilder";
+import { TerrainPoi, TerrainPoiPlanner } from "./TerrainPoiPlanner";
+import { TerrainPoiStats, TerrainPoiSystem } from "./TerrainPoiSystem";
+import { TerrainRoad, TerrainRoadPlanner } from "./TerrainRoadPlanner";
+import { TerrainRoadStats, TerrainRoadSystem } from "./TerrainRoadSystem";
 import { TerrainWaterConfig, TerrainWaterSystem } from "./TerrainWaterSystem";
 import type { TerrainDebugOverlay } from "./TerrainDebugOverlay";
 import {
@@ -31,6 +35,10 @@ export class TerrainSystem {
   private generator: ProceduralGenerator;
   private foliagePlanner: TerrainFoliagePlanner;
   private foliageSystem: TerrainFoliageSystem;
+  private poiPlanner: TerrainPoiPlanner;
+  private poiSystem: TerrainPoiSystem;
+  private roadPlanner: TerrainRoadPlanner;
+  private roadSystem: TerrainRoadSystem;
   private waterSystem: TerrainWaterSystem;
   private lodController: TerrainLODController;
   private readonly chunks: TerrainChunk[] = [];
@@ -41,6 +49,9 @@ export class TerrainSystem {
   private lodDistances: [number, number, number];
   private collisionRadius: number;
   private foliageRadius: number;
+  private foliageVisible = false;
+  private poiVisible = true;
+  private roadVisible = true;
   private debugViewMode = TerrainDebugViewMode.Final;
   private materialConfig: TerrainMaterialConfig | null = null;
   private readonly textureOptions: Required<TerrainTextureOptions>;
@@ -68,6 +79,14 @@ export class TerrainSystem {
       this.foliagePlanner,
       this.config
     );
+    this.poiPlanner = new TerrainPoiPlanner(this.config, this.generator);
+    this.poiSystem = new TerrainPoiSystem(this.scene, this.poiPlanner);
+    this.roadPlanner = new TerrainRoadPlanner(this.config, this.generator);
+    this.roadSystem = new TerrainRoadSystem(
+      this.scene,
+      this.roadPlanner,
+      this.config
+    );
     this.waterSystem = new TerrainWaterSystem(
       this.scene,
       this.config,
@@ -91,6 +110,12 @@ export class TerrainSystem {
     );
     this.materialConfig = TerrainMaterialFactory.getConfig(this.material);
     TerrainMaterialFactory.setWaterLevel(this.material, this.config.waterLevel);
+    TerrainMaterialFactory.setRiverRenderingParams(this.material, {
+      bankStrength: this.config.rivers.bankStrength,
+      dischargeStrength: this.waterSystem.getConfig().riverDischargeStrength,
+      meshThreshold: this.waterSystem.getConfig().riverMeshThreshold,
+      meshMinWidth: this.waterSystem.getConfig().riverMeshMinWidth
+    });
 
     for (let chunkZ = 0; chunkZ < this.config.chunksPerAxis; chunkZ += 1) {
       const row: TerrainChunk[] = [];
@@ -118,6 +143,17 @@ export class TerrainSystem {
 
     this.initialized = true;
     this.foliageSystem.initialize(this.chunks);
+    this.poiSystem.initialize();
+    this.roadSystem.initialize(this.poiSystem.getSites());
+    TerrainMaterialFactory.setRoadMask(
+      this.material,
+      this.roadSystem.getRoadMaskTexture()
+    );
+    TerrainMaterialFactory.setRoadMaskBounds(
+      this.material,
+      { x: this.config.worldMin, z: this.config.worldMin },
+      { x: this.config.worldSize, z: this.config.worldSize }
+    );
     this.waterSystem.initialize();
   }
 
@@ -153,7 +189,13 @@ export class TerrainSystem {
       }
     }
 
-    this.foliageSystem.update(cameraPosition, this.foliageRadius);
+    this.foliageSystem.update(
+      cameraPosition,
+      this.foliageVisible ? this.foliageRadius : 0
+    );
+    this.poiSystem.setVisible(this.poiVisible);
+    this.roadSystem.setVisible(this.roadVisible);
+    this.poiSystem.update();
     this.waterSystem.update(this.elapsedTimeSeconds, cameraPosition);
   }
 
@@ -162,6 +204,8 @@ export class TerrainSystem {
     this.debugOverlay = null;
     this.debugOverlayPromise = null;
     this.foliageSystem.dispose();
+    this.poiSystem.dispose();
+    this.roadSystem.dispose();
     this.waterSystem.dispose();
     this.chunks.forEach((chunk) => chunk.dispose());
     this.chunks.length = 0;
@@ -247,6 +291,14 @@ export class TerrainSystem {
 
   setWaterConfig(config: TerrainWaterConfig): void {
     this.waterSystem.setConfig(config);
+    if (this.material) {
+      TerrainMaterialFactory.setRiverRenderingParams(this.material, {
+        bankStrength: this.config.rivers.bankStrength,
+        dischargeStrength: config.riverDischargeStrength,
+        meshThreshold: config.riverMeshThreshold,
+        meshMinWidth: config.riverMeshMinWidth
+      });
+    }
   }
 
   getWaterConfig(): TerrainWaterConfig {
@@ -269,6 +321,14 @@ export class TerrainSystem {
     return this.foliageRadius;
   }
 
+  setShowFoliage(enabled: boolean): void {
+    this.foliageVisible = enabled;
+  }
+
+  getShowFoliage(): boolean {
+    return this.foliageVisible;
+  }
+
   setLodDistances(distances: readonly [number, number, number]): void {
     this.lodDistances = [...distances];
   }
@@ -287,6 +347,40 @@ export class TerrainSystem {
 
   getFoliageStats(): TerrainFoliageStats {
     return this.foliageSystem.getStats();
+  }
+
+  getPoiSites(): readonly TerrainPoi[] {
+    return this.poiSystem.getSites();
+  }
+
+  getPoiStats(): TerrainPoiStats {
+    return this.poiSystem.getStats();
+  }
+
+  getRoads(): readonly TerrainRoad[] {
+    return this.roadSystem.getRoads();
+  }
+
+  getRoadStats(): TerrainRoadStats {
+    return this.roadSystem.getStats();
+  }
+
+  setShowPoi(enabled: boolean): void {
+    this.poiVisible = enabled;
+    this.poiSystem.setVisible(enabled);
+  }
+
+  getShowPoi(): boolean {
+    return this.poiVisible;
+  }
+
+  setShowRoads(enabled: boolean): void {
+    this.roadVisible = enabled;
+    this.roadSystem.setVisible(enabled);
+  }
+
+  getShowRoads(): boolean {
+    return this.roadVisible;
   }
 
   setDebugViewMode(mode: TerrainDebugViewMode): void {

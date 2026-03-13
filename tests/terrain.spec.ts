@@ -419,23 +419,23 @@ describe("POI planning", () => {
     ).toBe(true);
   });
 
-  it("places taverns near travel nodes instead of defensive peaks", () => {
+  it("places outposts near travel nodes instead of defensive peaks", () => {
     const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
     const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
     const sites = planner.generateSites();
 
-    const taverns = sites.filter((site) => site.kind === "tavern");
-    expect(taverns.length).toBeGreaterThan(0);
+    const outposts = sites.filter((site) => site.kind === "outpost");
+    expect(outposts.length).toBeGreaterThan(0);
     expect(
-      taverns.some(
+      outposts.some(
         (site) =>
           site.tags.includes("crossroads") ||
           site.tags.includes("pass") ||
           site.tags.includes("ford")
       )
     ).toBe(true);
-    expect(taverns.some((site) => site.tags.includes("defensive"))).toBe(false);
-    expect(taverns.some((site) => site.tags.includes("prominent"))).toBe(false);
+    expect(outposts.some((site) => site.tags.includes("defensive"))).toBe(false);
+    expect(outposts.some((site) => site.tags.includes("prominent"))).toBe(false);
   });
 });
 
@@ -533,8 +533,8 @@ describe("Road planning", () => {
     const config = DEFAULT_TERRAIN_CONFIG;
     const generator = new ProceduralGenerator(config);
     const site = {
-      id: "tavern-test",
-      kind: "tavern" as const,
+      id: "outpost-test",
+      kind: "outpost" as const,
       x: 0,
       y: generator.sample(0, 0).height,
       z: 0,

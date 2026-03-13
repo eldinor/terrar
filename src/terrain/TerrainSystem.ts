@@ -487,7 +487,7 @@ export class TerrainSystem {
       this.poiSystem?.getStats() ?? {
         total: 0,
         villages: 0,
-        taverns: 0,
+        outposts: 0,
         mines: 0
       }
     );

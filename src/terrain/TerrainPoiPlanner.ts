@@ -4,7 +4,7 @@ import { TerrainConfig } from "./TerrainConfig";
 
 export enum TerrainPoiKind {
   Village = "village",
-  Tavern = "tavern",
+  Outpost = "outpost",
   Mine = "mine"
 }
 
@@ -61,7 +61,7 @@ interface TerrainPoiArchetype {
 
 const POI_ARCHETYPES: readonly TerrainPoiArchetype[] = [
   { kind: TerrainPoiKind.Village, maxCount: 4, radius: 156, minScore: 0.58 },
-  { kind: TerrainPoiKind.Tavern, maxCount: 2, radius: 168, minScore: 0.46 },
+  { kind: TerrainPoiKind.Outpost, maxCount: 2, radius: 168, minScore: 0.46 },
   { kind: TerrainPoiKind.Mine, maxCount: 4, radius: 148, minScore: 0.48 }
 ] as const;
 
@@ -103,9 +103,9 @@ export class TerrainPoiPlanner {
           this.scoreWaterVillage(context)
         );
         this.pushCandidate(
-          candidates.get(TerrainPoiKind.Tavern)!,
+          candidates.get(TerrainPoiKind.Outpost)!,
           context,
-          this.scoreTavern(context)
+          this.scoreOutpost(context)
         );
         this.pushCandidate(
           candidates.get(TerrainPoiKind.Mine)!,
@@ -227,7 +227,7 @@ export class TerrainPoiPlanner {
     };
   }
 
-  private scoreTavern(context: TerrainPoiContext) {
+  private scoreOutpost(context: TerrainPoiContext) {
     const buildable = context.localFlatness;
     const moderateHeight =
       smoothStep(this.config.waterLevel + 18, 72, context.height) *
@@ -243,7 +243,7 @@ export class TerrainPoiPlanner {
       travelerWater * 0.06 +
       safeFloodplain * 0.08;
     return {
-      kind: TerrainPoiKind.Tavern,
+      kind: TerrainPoiKind.Outpost,
       value,
       radius: 118,
       tags: buildContextTags(context, [

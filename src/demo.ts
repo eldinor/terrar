@@ -31,48 +31,87 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
     config: {},
   },
   {
-    name: "Archipelago",
+    name: "Large Mountain World",
     config: {
-      waterLevel: 8,
-      baseHeight: -34,
-      maxHeight: 200,
+      waterLevel: -8,
+      baseHeight: -22,
+      maxHeight: 292,
+      chunksPerAxis: 10,
+      chunkSize: 160,
       shape: {
-        continentAmplitude: 56,
-        radialFalloffStrength: 0.86,
-        mountainAmplitude: 88,
-        hillAmplitude: 34,
-        detailAmplitude: 5,
-      },
-    },
-  },
-  {
-    name: "Highlands",
-    config: {
-      waterLevel: -6,
-      baseHeight: -18,
-      maxHeight: 250,
-      shape: {
-        continentAmplitude: 86,
-        radialFalloffStrength: 0.48,
-        mountainAmplitude: 154,
-        hillAmplitude: 54,
+        continentAmplitude: 92,
+        radialFalloffStrength: 0.42,
+        mountainAmplitude: 176,
+        mountainFrequency: 0.0105,
+        hillAmplitude: 44,
         detailAmplitude: 10,
       },
+      erosion: {
+        enabled: true,
+        resolution: 257,
+        iterations: 14,
+        talusHeight: 1.45,
+        smoothing: 0.12,
+      },
     },
   },
   {
-    name: "Basin",
+    name: "Wet Riverlands",
     config: {
-      waterLevel: 12,
-      baseHeight: -42,
-      maxHeight: 168,
+      waterLevel: 6,
+      baseHeight: -28,
+      maxHeight: 196,
       shape: {
-        continentAmplitude: 64,
-        radialFalloffStrength: 0.92,
-        mountainAmplitude: 76,
-        hillAmplitude: 24,
-        detailAmplitude: 4,
+        continentAmplitude: 62,
+        radialFalloffStrength: 0.88,
+        mountainAmplitude: 92,
+        hillAmplitude: 34,
+        detailAmplitude: 6,
       },
+      rivers: {
+        enabled: true,
+        resolution: 257,
+        flowThreshold: 0.64,
+        bankStrength: 0.74,
+        lakeThreshold: 1.85,
+        depth: 1.8,
+        maxDepth: 5.5,
+        minSlope: 0.01,
+        minElevation: 4,
+      },
+    },
+  },
+  {
+    name: "Sparse Settlements",
+    config: {
+      poi: {
+        density: 0.58,
+        spacing: 1.35,
+      },
+      features: {
+        poi: true,
+        roads: false,
+      },
+    },
+    featureState: {
+      poiDebug: {
+        showScores: false,
+        showRadii: false,
+        showTags: false,
+        kinds: {
+          village: true,
+          outpost: true,
+          mine: true,
+        },
+        mineResources: {
+          coal: true,
+          iron: true,
+          copper: true,
+        },
+      },
+      hidePoiMarkerMeshes: false,
+      hidePoiLabels: false,
+      showPoiFootprints: true,
     },
   },
 ] as const;
@@ -875,6 +914,36 @@ function createPresetControls(): HTMLElement {
   buttons.style.width = "100%";
   buttons.style.boxSizing = "border-box";
 
+  const tools = document.createElement("div");
+  tools.style.display = "grid";
+  tools.style.gridTemplateColumns = "1fr 1fr";
+  tools.style.gap = "8px";
+  tools.style.width = "100%";
+  tools.style.boxSizing = "border-box";
+
+  const importInput = document.createElement("input");
+  importInput.type = "file";
+  importInput.accept = "application/json,.json";
+  importInput.style.display = "none";
+  importInput.addEventListener("change", async () => {
+    const file = importInput.files?.[0];
+    importInput.value = "";
+    if (!file) {
+      return;
+    }
+
+    try {
+      const imported = parseImportedPresets(await file.text());
+      const merged = mergeImportedPresets(getSavedPresets(), imported);
+      savePresets(merged);
+      presetOptions = getPresetOptions();
+      renderPanel();
+      renderFeaturePanel();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Failed to import presets.");
+    }
+  });
+
   const apply = createButton("Apply Preset", () => {
     const preset = presetOptions[Number(select.value)];
     draftConfig = mergeDraftWithOverrides(buildDraftConfig(), preset.config);
@@ -910,10 +979,23 @@ function createPresetControls(): HTMLElement {
     renderFeaturePanel();
   });
 
+  const exportButton = createButton("Export JSON", () => {
+    const preset = presetOptions[Number(select.value)];
+    downloadJsonFile(`${slugifyPresetName(preset.name)}.json`, preset);
+  });
+
+  const importButton = createButton("Import JSON", () => {
+    importInput.click();
+  });
+
   buttons.appendChild(apply);
   buttons.appendChild(save);
+  tools.appendChild(exportButton);
+  tools.appendChild(importButton);
   wrap.appendChild(select);
   wrap.appendChild(buttons);
+  wrap.appendChild(tools);
+  wrap.appendChild(importInput);
   return wrap;
 }
 
@@ -1047,7 +1129,7 @@ function createPoiStatsRow(): HTMLElement {
   row.style.whiteSpace = "pre-wrap";
   row.textContent =
     `POI ${stats.total}: V ${stats.villages} | ` +
-    `T ${stats.taverns} | M ${stats.mines}\n` +
+    `O ${stats.outposts} | M ${stats.mines}\n` +
     `Meshes ${meshStats.enabled}/${meshStats.total}`;
   return row;
 }
@@ -1139,7 +1221,7 @@ function createPoiDebugControls(): HTMLElement {
   (
     [
       ["Villages", "village"],
-      ["Taverns", "tavern"],
+      ["Outposts", "outpost"],
       ["Mines", "mine"],
     ] as const
   ).forEach(([label, kind]) => {
@@ -1428,8 +1510,8 @@ function getSavedPresets(): TerrainPreset[] {
   }
 
   try {
-    const parsed = JSON.parse(serialized) as TerrainPreset[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(serialized) as unknown;
+    return normalizeImportedPresets(parsed);
   } catch {
     return [];
   }
@@ -1437,6 +1519,78 @@ function getSavedPresets(): TerrainPreset[] {
 
 function savePresets(presets: TerrainPreset[]): void {
   window.localStorage.setItem(SAVED_PRESETS_KEY, JSON.stringify(presets));
+}
+
+function parseImportedPresets(serialized: string): TerrainPreset[] {
+  const parsed = JSON.parse(serialized) as unknown;
+  const presets = normalizeImportedPresets(parsed);
+  if (presets.length === 0) {
+    throw new Error("The imported JSON does not contain any valid presets.");
+  }
+  return presets;
+}
+
+function normalizeImportedPresets(value: unknown): TerrainPreset[] {
+  const list = Array.isArray(value) ? value : isTerrainPresetRecord(value) ? [value] : [];
+  return list.flatMap((entry) => (isTerrainPresetRecord(entry) ? [normalizePreset(entry)] : []));
+}
+
+function normalizePreset(value: TerrainPresetRecord): TerrainPreset {
+  const defaultPoiDebug = buildDraftConfig().poiDebug;
+  return {
+    name: value.name.trim(),
+    config: value.config ?? {},
+    featureState: value.featureState
+      ? {
+          poiDebug: clonePoiDebugConfig(value.featureState.poiDebug ?? defaultPoiDebug),
+          hidePoiMarkerMeshes: value.featureState.hidePoiMarkerMeshes ?? false,
+          hidePoiLabels: value.featureState.hidePoiLabels ?? false,
+          showPoiFootprints: value.featureState.showPoiFootprints ?? false,
+        }
+      : undefined,
+  };
+}
+
+function mergeImportedPresets(existing: TerrainPreset[], imported: TerrainPreset[]): TerrainPreset[] {
+  const byName = new Map<string, TerrainPreset>();
+  existing.forEach((preset) => byName.set(preset.name, preset));
+  imported.forEach((preset) => byName.set(preset.name, preset));
+  return [...byName.values()];
+}
+
+function downloadJsonFile(filename: string, payload: TerrainPreset): void {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
+function slugifyPresetName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "terrain-preset";
+}
+
+interface TerrainPresetRecord {
+  readonly name: string;
+  readonly config?: TerrainConfigOverrides;
+  readonly featureState?: Partial<PresetFeatureStateRecord>;
+}
+
+interface PresetFeatureStateRecord {
+  readonly poiDebug: MutableTerrainPoiDebugConfig;
+  readonly hidePoiMarkerMeshes: boolean;
+  readonly hidePoiLabels: boolean;
+  readonly showPoiFootprints: boolean;
+}
+
+function isTerrainPresetRecord(value: unknown): value is TerrainPresetRecord {
+  return typeof value === "object" && value !== null && typeof (value as { name?: unknown }).name === "string";
 }
 
 function createHeading(text: string): HTMLElement {

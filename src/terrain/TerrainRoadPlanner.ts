@@ -97,7 +97,7 @@ export class TerrainRoadPlanner {
     const distance = planarDistance(a, b);
     const typeBias =
       (a.kind === TerrainPoiKind.Village || b.kind === TerrainPoiKind.Village ? -22 : 0) +
-      (a.kind === TerrainPoiKind.Tavern || b.kind === TerrainPoiKind.Tavern ? -16 : 0) +
+      (a.kind === TerrainPoiKind.Outpost || b.kind === TerrainPoiKind.Outpost ? -16 : 0) +
       (hasTag(a, "ford") || hasTag(b, "ford") ? -14 : 0) +
       (hasTag(a, "pass") || hasTag(b, "pass") ? -10 : 0) +
       (hasTag(a, "crossroads") || hasTag(b, "crossroads") ? -12 : 0) +
@@ -521,7 +521,7 @@ function getPoiApproachRadius(kind: TerrainPoiKind): number {
   switch (kind) {
     case TerrainPoiKind.Village:
       return 10.5;
-    case TerrainPoiKind.Tavern:
+    case TerrainPoiKind.Outpost:
       return 8.5;
     case TerrainPoiKind.Mine:
       return 9.5;

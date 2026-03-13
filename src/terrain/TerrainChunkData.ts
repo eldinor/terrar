@@ -339,7 +339,7 @@ function getPoiFootprintParams(kind: TerrainPoiKind): PoiFootprintParams {
   switch (kind) {
     case TerrainPoiKind.Village:
       return { innerRadius: 12, outerRadius: 20, cutDepth: 0.28 };
-    case TerrainPoiKind.Tavern:
+    case TerrainPoiKind.Outpost:
       return { innerRadius: 10, outerRadius: 17, cutDepth: 0.34 };
     case TerrainPoiKind.Mine:
       return { innerRadius: 11, outerRadius: 18, cutDepth: 0.42 };

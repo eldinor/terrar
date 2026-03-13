@@ -16,7 +16,7 @@ import {
 export interface TerrainPoiStats {
   readonly total: number;
   readonly villages: number;
-  readonly taverns: number;
+  readonly outposts: number;
   readonly mines: number;
 }
 
@@ -39,7 +39,7 @@ export const DEFAULT_TERRAIN_POI_DEBUG_CONFIG: TerrainPoiDebugConfig = Object.fr
   showTags: true,
   kinds: Object.freeze({
     [TerrainPoiKind.Village]: true,
-    [TerrainPoiKind.Tavern]: true,
+    [TerrainPoiKind.Outpost]: true,
     [TerrainPoiKind.Mine]: true
   }),
   mineResources: Object.freeze({
@@ -136,7 +136,7 @@ export class TerrainPoiSystem {
     const stats = {
       total: this.sites.length,
       villages: 0,
-      taverns: 0,
+      outposts: 0,
       mines: 0
     };
 
@@ -145,8 +145,8 @@ export class TerrainPoiSystem {
         case TerrainPoiKind.Village:
           stats.villages += 1;
           break;
-        case TerrainPoiKind.Tavern:
-          stats.taverns += 1;
+        case TerrainPoiKind.Outpost:
+          stats.outposts += 1;
           break;
         case TerrainPoiKind.Mine:
           stats.mines += 1;
@@ -302,7 +302,7 @@ function getPoiColor(site: TerrainPoi): Color3 {
   switch (site.kind) {
     case TerrainPoiKind.Village:
       return new Color3(0.98, 0.82, 0.42);
-    case TerrainPoiKind.Tavern:
+    case TerrainPoiKind.Outpost:
       return new Color3(0.96, 0.5, 0.26);
     case TerrainPoiKind.Mine:
       return getMineResourceColor(getMineResourceKind(site));
@@ -313,8 +313,8 @@ function getPoiLabel(site: TerrainPoi): string {
   switch (site.kind) {
     case TerrainPoiKind.Village:
       return "Village";
-    case TerrainPoiKind.Tavern:
-      return "Tavern";
+    case TerrainPoiKind.Outpost:
+      return "Outpost";
     case TerrainPoiKind.Mine:
       return `${capitalizeWord(getMineResourceKind(site) ?? "mine")} Mine`;
   }

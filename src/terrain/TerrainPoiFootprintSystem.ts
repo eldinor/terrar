@@ -26,7 +26,7 @@ export class TerrainPoiFootprintSystem {
     const materialSet = createFootprintMaterials(this.scene);
     this.materials.push(
       materialSet.village,
-      materialSet.tavern,
+      materialSet.outpost,
       materialSet.mine,
       materialSet.accent
     );
@@ -36,8 +36,8 @@ export class TerrainPoiFootprintSystem {
         case TerrainPoiKind.Village:
           this.createVillage(site, materialSet.village, materialSet.accent);
           break;
-        case TerrainPoiKind.Tavern:
-          this.createTavern(site, materialSet.tavern, materialSet.accent);
+        case TerrainPoiKind.Outpost:
+          this.createOutpost(site, materialSet.outpost, materialSet.accent);
           break;
         case TerrainPoiKind.Mine:
           this.createMine(site, materialSet.mine, materialSet.accent);
@@ -98,7 +98,7 @@ export class TerrainPoiFootprintSystem {
     this.registerMesh(well);
   }
 
-  private createTavern(
+  private createOutpost(
     site: TerrainPoi,
     structureMaterial: StandardMaterial,
     accentMaterial: StandardMaterial
@@ -208,7 +208,7 @@ export class TerrainPoiFootprintSystem {
 
 function createFootprintMaterials(scene: Scene): {
   village: StandardMaterial;
-  tavern: StandardMaterial;
+  outpost: StandardMaterial;
   mine: StandardMaterial;
   accent: StandardMaterial;
 } {
@@ -216,9 +216,9 @@ function createFootprintMaterials(scene: Scene): {
   village.diffuseColor = new Color3(0.63, 0.54, 0.38);
   village.specularColor = Color3.Black();
 
-  const tavern = new StandardMaterial("poi-footprint-tavern", scene);
-  tavern.diffuseColor = new Color3(0.72, 0.42, 0.24);
-  tavern.specularColor = Color3.Black();
+  const outpost = new StandardMaterial("poi-footprint-outpost", scene);
+  outpost.diffuseColor = new Color3(0.72, 0.42, 0.24);
+  outpost.specularColor = Color3.Black();
 
   const mine = new StandardMaterial("poi-footprint-mine", scene);
   mine.diffuseColor = new Color3(0.46, 0.38, 0.32);
@@ -228,7 +228,7 @@ function createFootprintMaterials(scene: Scene): {
   accent.diffuseColor = new Color3(0.36, 0.28, 0.2);
   accent.specularColor = Color3.Black();
 
-  return { village, tavern, mine, accent };
+  return { village, outpost, mine, accent };
 }
 
 function createSiteRng(seed: string): () => number {

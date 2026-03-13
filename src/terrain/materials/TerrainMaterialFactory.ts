@@ -35,7 +35,7 @@ export class TerrainMaterialFactory {
     ensureTerrainBlendShadersRegistered();
 
     const material = new ShaderMaterial("terrain-material", scene, "terrainBlend", {
-      attributes: ["position", "normal", "uv", "uv2", "color"],
+      attributes: ["position", "normal", "uv", "uv2", "uv3", "uv4", "color"],
       uniforms: [
         "world",
         "worldViewProjection",
@@ -342,6 +342,8 @@ function ensureTerrainBlendShadersRegistered(): void {
     attribute vec3 normal;
     attribute vec2 uv;
     attribute vec2 uv2;
+    attribute vec2 uv3;
+    attribute vec2 uv4;
     attribute vec4 color;
 
     uniform mat4 world;
@@ -351,6 +353,8 @@ function ensureTerrainBlendShadersRegistered(): void {
     varying vec3 vWorldNormal;
     varying vec2 vUV;
     varying vec2 vUv2;
+    varying vec2 vUv3;
+    varying vec2 vUv4;
     varying vec4 vColor;
 
     void main(void) {
@@ -359,6 +363,8 @@ function ensureTerrainBlendShadersRegistered(): void {
       vWorldNormal = normalize(mat3(world) * normal);
       vUV = uv;
       vUv2 = uv2;
+      vUv3 = uv3;
+      vUv4 = uv4;
       vColor = color;
       gl_Position = worldViewProjection * vec4(position, 1.0);
     }
@@ -371,6 +377,8 @@ function ensureTerrainBlendShadersRegistered(): void {
     varying vec3 vWorldNormal;
     varying vec2 vUV;
     varying vec2 vUv2;
+    varying vec2 vUv3;
+    varying vec2 vUv4;
     varying vec4 vColor;
 
     uniform sampler2D grassAlbedo;
@@ -489,6 +497,9 @@ function ensureTerrainBlendShadersRegistered(): void {
       float flow = saturate(vColor.a);
       float river = saturate(vUv2.x);
       float lake = saturate(vUv2.y);
+      float coal = saturate(vUv3.x);
+      float iron = saturate(vUv3.y);
+      float copper = saturate(vUv4.x);
       float channelMask = saturate(flow * 1.15 + erosionWear * 0.35);
       float wetRiver = smoothstep(0.03, 0.28, river);
       float openRiver = smoothstep(0.2, 0.55, river);
@@ -687,6 +698,22 @@ function ensureTerrainBlendShadersRegistered(): void {
           ),
           1.0
         );
+      } else if (debugMode == 16) {
+        vec3 resourceColor =
+          vec3(0.18, 0.18, 0.2) * coal +
+          vec3(0.76, 0.4, 0.24) * iron +
+          vec3(0.2, 0.7, 0.56) * copper;
+        float resourceStrength = max(max(coal, iron), copper);
+        finalCol = vec4(
+          mix(vec3(0.05, 0.05, 0.06), resourceColor, resourceStrength),
+          1.0
+        );
+      } else if (debugMode == 17) {
+        finalCol = vec4(mix(vec3(0.05, 0.05, 0.06), vec3(0.62, 0.64, 0.7), coal), 1.0);
+      } else if (debugMode == 18) {
+        finalCol = vec4(mix(vec3(0.05, 0.05, 0.06), vec3(0.82, 0.46, 0.28), iron), 1.0);
+      } else if (debugMode == 19) {
+        finalCol = vec4(mix(vec3(0.05, 0.05, 0.06), vec3(0.24, 0.74, 0.6), copper), 1.0);
       } else {
         float diffuse = max(dot(normalW, normalize(lightDirection)), 0.0);
         float wrappedDiffuse = diffuse * 0.75 + 0.25;

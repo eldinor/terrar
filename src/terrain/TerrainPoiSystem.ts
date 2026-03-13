@@ -1,17 +1,28 @@
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
-import { TerrainPoi, TerrainPoiKind, TerrainPoiPlanner } from "./TerrainPoiPlanner";
+import {
+  getMineResourceKind,
+  TerrainMineResource,
+  TerrainPoi,
+  TerrainPoiKind,
+  TerrainPoiPlanner
+} from "./TerrainPoiPlanner";
 
 export interface TerrainPoiStats {
   readonly total: number;
   readonly villages: number;
-  readonly harbors: number;
-  readonly hillforts: number;
+  readonly taverns: number;
   readonly mines: number;
+}
+
+export interface TerrainPoiMeshStats {
+  readonly total: number;
+  readonly enabled: number;
 }
 
 export interface TerrainPoiDebugConfig {
@@ -19,6 +30,7 @@ export interface TerrainPoiDebugConfig {
   readonly showRadii: boolean;
   readonly showTags: boolean;
   readonly kinds: Readonly<Record<TerrainPoiKind, boolean>>;
+  readonly mineResources: Readonly<Record<TerrainMineResource, boolean>>;
 }
 
 export const DEFAULT_TERRAIN_POI_DEBUG_CONFIG: TerrainPoiDebugConfig = Object.freeze({
@@ -27,9 +39,13 @@ export const DEFAULT_TERRAIN_POI_DEBUG_CONFIG: TerrainPoiDebugConfig = Object.fr
   showTags: true,
   kinds: Object.freeze({
     [TerrainPoiKind.Village]: true,
-    [TerrainPoiKind.Harbor]: true,
-    [TerrainPoiKind.Hillfort]: true,
+    [TerrainPoiKind.Tavern]: true,
     [TerrainPoiKind.Mine]: true
+  }),
+  mineResources: Object.freeze({
+    coal: true,
+    iron: true,
+    copper: true
   })
 });
 
@@ -39,6 +55,8 @@ export class TerrainPoiSystem {
   private readonly root: HTMLDivElement;
   private sites: TerrainPoi[] = [];
   private visible = true;
+  private markerMeshesVisible = true;
+  private labelsVisible = true;
   private debugConfig: TerrainPoiDebugConfig = clonePoiDebugConfig(
     DEFAULT_TERRAIN_POI_DEBUG_CONFIG
   );
@@ -92,7 +110,10 @@ export class TerrainPoiSystem {
       const inFrontOfCamera = projected.z >= 0 && projected.z <= 1;
       const label = this.labels[index];
       const siteVisible =
-        this.visible && this.debugConfig.kinds[site.kind] && inFrontOfCamera;
+        this.visible &&
+        this.labelsVisible &&
+        siteMatchesDebugConfig(site, this.debugConfig) &&
+        inFrontOfCamera;
       label.style.display = siteVisible ? "block" : "none";
       label.style.transform = `translate(${projected.x}px, ${projected.y}px) translate(-50%, -100%)`;
     });
@@ -115,8 +136,7 @@ export class TerrainPoiSystem {
     const stats = {
       total: this.sites.length,
       villages: 0,
-      harbors: 0,
-      hillforts: 0,
+      taverns: 0,
       mines: 0
     };
 
@@ -125,11 +145,8 @@ export class TerrainPoiSystem {
         case TerrainPoiKind.Village:
           stats.villages += 1;
           break;
-        case TerrainPoiKind.Harbor:
-          stats.harbors += 1;
-          break;
-        case TerrainPoiKind.Hillfort:
-          stats.hillforts += 1;
+        case TerrainPoiKind.Tavern:
+          stats.taverns += 1;
           break;
         case TerrainPoiKind.Mine:
           stats.mines += 1;
@@ -138,6 +155,20 @@ export class TerrainPoiSystem {
     });
 
     return stats;
+  }
+
+  getMeshStats(): TerrainPoiMeshStats {
+    let enabled = 0;
+    this.meshes.forEach((mesh) => {
+      if (mesh.isEnabled()) {
+        enabled += 1;
+      }
+    });
+
+    return {
+      total: this.meshes.length,
+      enabled
+    };
   }
 
   setVisible(visible: boolean): void {
@@ -158,11 +189,35 @@ export class TerrainPoiSystem {
     return clonePoiDebugConfig(this.debugConfig);
   }
 
+  setMarkerMeshesVisible(visible: boolean): void {
+    this.markerMeshesVisible = visible;
+    this.applyDebugConfig();
+  }
+
+  getMarkerMeshesVisible(): boolean {
+    return this.markerMeshesVisible;
+  }
+
+  setLabelsVisible(visible: boolean): void {
+    this.labelsVisible = visible;
+    this.applyDebugConfig();
+  }
+
+  getLabelsVisible(): boolean {
+    return this.labelsVisible;
+  }
+
   private createMarker(site: TerrainPoi): Mesh {
     const marker = createMarkerMesh(this.scene, site);
-    marker.position.set(site.x, site.y + 10, site.z);
+    const markerHeight = getPoiMarkerHeight(site);
+    marker.position.set(site.x, site.y + markerHeight + 10, site.z);
     marker.alwaysSelectAsActiveMesh = true;
     marker.isPickable = false;
+    marker.renderingGroupId = 3;
+    marker.billboardMode = AbstractMesh.BILLBOARDMODE_ALL;
+    marker.renderOutline = true;
+    marker.outlineColor = Color3.Black();
+    marker.outlineWidth = 0.03;
     return marker;
   }
 
@@ -199,11 +254,13 @@ export class TerrainPoiSystem {
   private applyDebugConfig(): void {
     this.sites.forEach((site, index) => {
       const enabled = this.visible && this.debugConfig.kinds[site.kind];
-      this.meshes[index]?.setEnabled(enabled);
+      const visible = enabled && siteMatchesDebugConfig(site, this.debugConfig);
+      this.meshes[index]?.setEnabled(visible && this.markerMeshesVisible);
       const label = this.labels[index];
       if (label) {
         label.textContent = buildPoiLabel(site, this.debugConfig);
-        if (!enabled) {
+        applyLabelStyle(label, site);
+        if (!(visible && this.labelsVisible)) {
           label.style.display = "none";
         }
       }
@@ -212,71 +269,54 @@ export class TerrainPoiSystem {
 }
 
 function createMarkerMesh(scene: Scene, site: TerrainPoi): Mesh {
-  const color = getPoiColor(site.kind);
-  let marker: Mesh;
-
-  switch (site.kind) {
-    case TerrainPoiKind.Village:
-      marker = MeshBuilder.CreateCylinder(
-        `poi-${site.id}`,
-        { height: 18, diameterTop: 0, diameterBottom: 8, tessellation: 4 },
-        scene
-      );
-      break;
-    case TerrainPoiKind.Harbor:
-      marker = MeshBuilder.CreateBox(
-        `poi-${site.id}`,
-        { width: 10, height: 12, depth: 10 },
-        scene
-      );
-      break;
-    case TerrainPoiKind.Hillfort:
-      marker = MeshBuilder.CreateCylinder(
-        `poi-${site.id}`,
-        { height: 14, diameterTop: 7, diameterBottom: 11, tessellation: 6 },
-        scene
-      );
-      break;
-    case TerrainPoiKind.Mine:
-      marker = MeshBuilder.CreatePolyhedron(
-        `poi-${site.id}`,
-        { type: 2, size: 7 },
-        scene
-      );
-      break;
-  }
+  const color = getPoiColor(site);
+  const markerHeight = getPoiMarkerHeight(site);
+  const markerWidth = getPoiMarkerWidth(site);
+  const marker = MeshBuilder.CreatePlane(
+    `poi-${site.id}`,
+    { width: markerWidth, height: markerHeight },
+    scene
+  );
 
   const material = new StandardMaterial(`poi-${site.id}-material`, scene);
   material.emissiveColor = color;
-  material.diffuseColor = color.scale(0.25);
+  material.diffuseColor = color.scale(0.45);
   material.specularColor = Color3.Black();
+  material.disableLighting = true;
+  material.backFaceCulling = false;
+  material.disableDepthWrite = true;
+  material.alpha = 0.96;
   marker.material = material;
   return marker;
 }
 
-function getPoiColor(kind: TerrainPoiKind): Color3 {
-  switch (kind) {
+function getPoiMarkerHeight(site: TerrainPoi): number {
+  return Math.max(22, Math.min(42, site.radius * 0.2));
+}
+
+function getPoiMarkerWidth(site: TerrainPoi): number {
+  return Math.max(14, Math.min(28, site.radius * 0.12));
+}
+
+function getPoiColor(site: TerrainPoi): Color3 {
+  switch (site.kind) {
     case TerrainPoiKind.Village:
       return new Color3(0.98, 0.82, 0.42);
-    case TerrainPoiKind.Harbor:
-      return new Color3(0.34, 0.78, 1.0);
-    case TerrainPoiKind.Hillfort:
-      return new Color3(1.0, 0.42, 0.3);
+    case TerrainPoiKind.Tavern:
+      return new Color3(0.96, 0.5, 0.26);
     case TerrainPoiKind.Mine:
-      return new Color3(0.82, 0.62, 0.44);
+      return getMineResourceColor(getMineResourceKind(site));
   }
 }
 
-function getPoiLabel(kind: TerrainPoiKind): string {
-  switch (kind) {
+function getPoiLabel(site: TerrainPoi): string {
+  switch (site.kind) {
     case TerrainPoiKind.Village:
       return "Village";
-    case TerrainPoiKind.Harbor:
-      return "Harbor";
-    case TerrainPoiKind.Hillfort:
-      return "Hillfort";
+    case TerrainPoiKind.Tavern:
+      return "Tavern";
     case TerrainPoiKind.Mine:
-      return "Mine";
+      return `${capitalizeWord(getMineResourceKind(site) ?? "mine")} Mine`;
   }
 }
 
@@ -284,7 +324,7 @@ function buildPoiLabel(
   site: TerrainPoi,
   config: TerrainPoiDebugConfig
 ): string {
-  const lines = [getPoiLabel(site.kind)];
+  const lines = [getPoiLabel(site)];
   if (config.showScores) {
     lines.push(`score ${site.score.toFixed(2)}`);
   }
@@ -304,6 +344,51 @@ function clonePoiDebugConfig(
     showScores: config.showScores,
     showRadii: config.showRadii,
     showTags: config.showTags,
-    kinds: { ...config.kinds }
+    kinds: { ...config.kinds },
+    mineResources: { ...config.mineResources }
   };
+}
+
+function siteMatchesDebugConfig(
+  site: TerrainPoi,
+  config: TerrainPoiDebugConfig
+): boolean {
+  if (!config.kinds[site.kind]) {
+    return false;
+  }
+
+  if (site.kind !== TerrainPoiKind.Mine) {
+    return true;
+  }
+
+  const resource = getMineResourceKind(site);
+  return resource ? config.mineResources[resource] : true;
+}
+
+function getMineResourceColor(resource: TerrainMineResource | null): Color3 {
+  switch (resource) {
+    case "iron":
+      return new Color3(0.82, 0.46, 0.28);
+    case "copper":
+      return new Color3(0.24, 0.74, 0.6);
+    case "coal":
+    default:
+      return new Color3(0.62, 0.64, 0.7);
+  }
+}
+
+function applyLabelStyle(label: HTMLDivElement, site: TerrainPoi): void {
+  const color = getPoiColor(site).toHexString();
+  label.style.color = color;
+  label.style.border = `1px solid ${hexWithAlpha(color, "38")}`;
+  label.style.background =
+    `linear-gradient(180deg, rgba(8, 13, 19, 0.82), rgba(8, 13, 19, 0.6))`;
+}
+
+function hexWithAlpha(color: string, alpha: string): string {
+  return `${color}${alpha}`;
+}
+
+function capitalizeWord(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

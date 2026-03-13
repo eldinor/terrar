@@ -83,7 +83,7 @@ export class TerrainRoadPlanner {
         }))
         .sort((a, b) => a.score - b.score);
 
-      const limit = poi.kind === TerrainPoiKind.Harbor ? 2 : 1;
+      const limit = 1;
       sorted.slice(0, limit).forEach(({ other, score }) => {
         candidates.push({ from: poi, to: other, score });
       });
@@ -97,9 +97,10 @@ export class TerrainRoadPlanner {
     const distance = planarDistance(a, b);
     const typeBias =
       (a.kind === TerrainPoiKind.Village || b.kind === TerrainPoiKind.Village ? -22 : 0) +
-      (a.kind === TerrainPoiKind.Harbor || b.kind === TerrainPoiKind.Harbor ? -12 : 0) +
+      (a.kind === TerrainPoiKind.Tavern || b.kind === TerrainPoiKind.Tavern ? -16 : 0) +
       (hasTag(a, "ford") || hasTag(b, "ford") ? -14 : 0) +
       (hasTag(a, "pass") || hasTag(b, "pass") ? -10 : 0) +
+      (hasTag(a, "crossroads") || hasTag(b, "crossroads") ? -12 : 0) +
       (a.kind === b.kind ? 18 : 0);
     return distance + typeBias;
   }
@@ -167,9 +168,14 @@ export class TerrainRoadPlanner {
     const crossingBonus = this.computeCrossingBonus(fromPos.x, fromPos.z, toPos.x, toPos.z);
     const passBonus = this.computePassBonus(toPos.x, toPos.z, toSample.height, slope);
     const floodplainPenalty = this.computeFloodplainPenalty(fromSample, toSample, slope);
+    const steepPenalty =
+      1 +
+      smoothStep(0.08, 0.2, slope) * 2.8 +
+      smoothStep(0.18, 0.32, slope) * 8 +
+      smoothStep(0.3, 0.46, slope) * 18;
     return (
       planar *
-      (1 + slope * 5.5) *
+      steepPenalty *
       riverPenalty *
       lakePenalty *
       flowPenalty *
@@ -200,12 +206,20 @@ export class TerrainRoadPlanner {
       const sample = this.generator.sample(world.x, world.z);
       return new Vector3(world.x, sample.height + 3.2, world.z);
     });
-
-    points[0] = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
-    points[points.length - 1] = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+    const approachedPoints = applyPoiApproachPoints(
+      points,
+      fromPoi,
+      toPoi,
+      this.generator
+    );
 
     return {
-      points: simplifyRoadPoints(points),
+      points: smoothRoadPoints(
+        simplifyRoadPoints(approachedPoints),
+        this.generator,
+        fromPoi,
+        toPoi
+      ),
       cost
     };
   }
@@ -285,7 +299,7 @@ export class TerrainRoadPlanner {
     const south = this.generator.sample(x, z - span).height;
     const saddleRelief = Math.max(Math.min(east, west) - height, Math.min(north, south) - height);
     const highEnough = smoothStep(72, 180, height);
-    const moderateSlope = 1 - smoothStep(0.16, 0.42, slope);
+    const moderateSlope = 1 - smoothStep(0.12, 0.28, slope);
     return Scalar.Clamp(
       smoothStep(4, 20, saddleRelief) * highEnough * moderateSlope,
       0,
@@ -366,6 +380,172 @@ function simplifyRoadPoints(points: readonly Vector3[]): Vector3[] {
   }
   simplified.push(points[points.length - 1]);
   return simplified;
+}
+
+function smoothRoadPoints(
+  points: readonly Vector3[],
+  generator: ProceduralGenerator,
+  fromPoi: TerrainPoi,
+  toPoi: TerrainPoi
+): Vector3[] {
+  if (points.length <= 2) {
+    return [...points];
+  }
+
+  let smoothed = [...points];
+  const passes = Math.min(2, Math.max(1, Math.floor(points.length / 6)));
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const next: Vector3[] = [smoothed[0].clone()];
+
+    for (let index = 1; index < smoothed.length - 1; index += 1) {
+      const previous = smoothed[index - 1];
+      const current = smoothed[index];
+      const following = smoothed[index + 1];
+      const before = Vector3.Lerp(previous, current, 0.78);
+      const after = Vector3.Lerp(current, following, 0.22);
+
+      next.push(clampRoadPointToSurface(before, generator));
+      next.push(clampRoadPointToSurface(after, generator));
+    }
+
+    next.push(smoothed[smoothed.length - 1].clone());
+    smoothed = simplifyRoadPoints(next);
+  }
+
+  smoothed[0] = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
+  smoothed[smoothed.length - 1] = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+  return ensurePoiApproachPoints(smoothed, fromPoi, toPoi, generator);
+}
+
+function applyPoiApproachPoints(
+  points: readonly Vector3[],
+  fromPoi: TerrainPoi,
+  toPoi: TerrainPoi,
+  generator: ProceduralGenerator
+): Vector3[] {
+  const fromCenter = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
+  const toCenter = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+
+  if (points.length <= 1) {
+    return [fromCenter, toCenter];
+  }
+
+  const approached = [...points];
+  approached[0] = fromCenter;
+  approached[approached.length - 1] = toCenter;
+
+  const startApproach = createPoiApproachPoint(fromPoi, approached[1], generator);
+  const endApproach = createPoiApproachPoint(
+    toPoi,
+    approached[Math.max(approached.length - 2, 0)],
+    generator
+  );
+
+  if (startApproach) {
+    approached.splice(1, 0, startApproach);
+  }
+
+  if (endApproach) {
+    approached.splice(approached.length - 1, 0, endApproach);
+  }
+
+  return approached;
+}
+
+function ensurePoiApproachPoints(
+  points: readonly Vector3[],
+  fromPoi: TerrainPoi,
+  toPoi: TerrainPoi,
+  generator: ProceduralGenerator
+): Vector3[] {
+  if (points.length <= 1) {
+    return [...points];
+  }
+
+  const ensured = [...points];
+  const fromApproach = createPoiApproachPoint(
+    fromPoi,
+    ensured[Math.min(ensured.length - 1, 1)],
+    generator
+  );
+  if (
+    fromApproach &&
+    !hasNearbyApproachPoint(ensured.slice(1, Math.min(4, ensured.length - 1)), fromPoi, 4, 14)
+  ) {
+    ensured.splice(1, 0, fromApproach);
+  }
+
+  const toApproach = createPoiApproachPoint(
+    toPoi,
+    ensured[Math.max(0, ensured.length - 2)],
+    generator
+  );
+  if (
+    toApproach &&
+    !hasNearbyApproachPoint(
+      ensured.slice(Math.max(1, ensured.length - 4), ensured.length - 1),
+      toPoi,
+      4,
+      14
+    )
+  ) {
+    ensured.splice(ensured.length - 1, 0, toApproach);
+  }
+
+  ensured[0] = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
+  ensured[ensured.length - 1] = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+  return ensured;
+}
+
+function createPoiApproachPoint(
+  poi: TerrainPoi,
+  toward: Vector3,
+  generator: ProceduralGenerator
+): Vector3 | null {
+  const dx = toward.x - poi.x;
+  const dz = toward.z - poi.z;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  if (length < 0.001) {
+    return null;
+  }
+
+  const radius = getPoiApproachRadius(poi.kind);
+  const x = poi.x + (dx / length) * radius;
+  const z = poi.z + (dz / length) * radius;
+  const sample = generator.sample(x, z);
+  return new Vector3(x, sample.height + 3.2, z);
+}
+
+function getPoiApproachRadius(kind: TerrainPoiKind): number {
+  switch (kind) {
+    case TerrainPoiKind.Village:
+      return 10.5;
+    case TerrainPoiKind.Tavern:
+      return 8.5;
+    case TerrainPoiKind.Mine:
+      return 9.5;
+  }
+}
+
+function hasNearbyApproachPoint(
+  points: readonly Vector3[],
+  poi: TerrainPoi,
+  minDistance: number,
+  maxDistance: number
+): boolean {
+  return points.some((point) => {
+    const distance = Math.hypot(point.x - poi.x, point.z - poi.z);
+    return distance > minDistance && distance < maxDistance;
+  });
+}
+
+function clampRoadPointToSurface(
+  point: Vector3,
+  generator: ProceduralGenerator
+): Vector3 {
+  const sample = generator.sample(point.x, point.z);
+  return new Vector3(point.x, sample.height + 3.2, point.z);
 }
 
 function estimateCrossingWidth(

@@ -18,7 +18,11 @@ import { TerrainPoi } from "./terrain/TerrainPoiPlanner";
 import { TerrainRoad } from "./terrain/TerrainRoadPlanner";
 import { TerrainSystem, TerrainSystemBuildOptions } from "./terrain/TerrainSystem";
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
-import { TerrainPoiDebugConfig, TerrainPoiStats } from "./terrain/TerrainPoiSystem";
+import {
+  TerrainPoiDebugConfig,
+  TerrainPoiMeshStats,
+  TerrainPoiStats
+} from "./terrain/TerrainPoiSystem";
 import { TerrainRoadStats } from "./terrain/TerrainRoadSystem";
 import { TerrainChunkBuildProfile } from "./terrain/TerrainSystem";
 import {
@@ -48,6 +52,12 @@ export interface TerrainDemo {
   readonly getShowFoliage: () => boolean;
   readonly setShowPoi: (enabled: boolean) => void;
   readonly getShowPoi: () => boolean;
+  readonly setPoiMarkerMeshesVisible: (enabled: boolean) => void;
+  readonly getPoiMarkerMeshesVisible: () => boolean;
+  readonly setPoiLabelsVisible: (enabled: boolean) => void;
+  readonly getPoiLabelsVisible: () => boolean;
+  readonly setShowPoiFootprints: (enabled: boolean) => void;
+  readonly getShowPoiFootprints: () => boolean;
   readonly setShowRoads: (enabled: boolean) => void;
   readonly getShowRoads: () => boolean;
   readonly setLodDistances: (distances: readonly [number, number, number]) => void;
@@ -65,6 +75,7 @@ export interface TerrainDemo {
   readonly getFoliageStats: () => TerrainFoliageStats;
   readonly getPoiSites: () => readonly TerrainPoi[];
   readonly getPoiStats: () => TerrainPoiStats;
+  readonly getPoiMeshStats: () => TerrainPoiMeshStats;
   readonly setPoiDebugConfig: (config: TerrainPoiDebugConfig) => void;
   readonly getPoiDebugConfig: () => TerrainPoiDebugConfig;
   readonly getRoads: () => readonly TerrainRoad[];
@@ -242,6 +253,9 @@ export function createTerrainDemo(
     const foliageRadius = terrainSystem.getFoliageRadius();
     const showFoliage = terrainSystem.getShowFoliage();
     const showPoi = terrainSystem.getShowPoi();
+    const poiMarkerMeshesVisible = terrainSystem.getPoiMarkerMeshesVisible();
+    const poiLabelsVisible = terrainSystem.getPoiLabelsVisible();
+    const showPoiFootprints = terrainSystem.getShowPoiFootprints();
     const poiDebugConfig = terrainSystem.getPoiDebugConfig();
     const showRoads = terrainSystem.getShowRoads();
     const lodDistances = terrainSystem.getLodDistances();
@@ -310,6 +324,9 @@ export function createTerrainDemo(
     );
     terrainSystem.setShowFoliage(showFoliage);
     terrainSystem.setShowPoi(showPoi);
+    terrainSystem.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
+    terrainSystem.setPoiLabelsVisible(poiLabelsVisible);
+    terrainSystem.setShowPoiFootprints(showPoiFootprints);
     terrainSystem.setPoiDebugConfig(poiDebugConfig);
     terrainSystem.setShowRoads(showRoads);
     terrainSystem.setLodDistances(nextConfigOverrides.lodDistances ?? lodDistances);
@@ -358,6 +375,15 @@ export function createTerrainDemo(
     getShowFoliage: () => terrainSystem.getShowFoliage(),
     setShowPoi: (enabled: boolean) => terrainSystem.setShowPoi(enabled),
     getShowPoi: () => terrainSystem.getShowPoi(),
+    setPoiMarkerMeshesVisible: (enabled: boolean) =>
+      terrainSystem.setPoiMarkerMeshesVisible(enabled),
+    getPoiMarkerMeshesVisible: () => terrainSystem.getPoiMarkerMeshesVisible(),
+    setPoiLabelsVisible: (enabled: boolean) =>
+      terrainSystem.setPoiLabelsVisible(enabled),
+    getPoiLabelsVisible: () => terrainSystem.getPoiLabelsVisible(),
+    setShowPoiFootprints: (enabled: boolean) =>
+      terrainSystem.setShowPoiFootprints(enabled),
+    getShowPoiFootprints: () => terrainSystem.getShowPoiFootprints(),
     setShowRoads: (enabled: boolean) => terrainSystem.setShowRoads(enabled),
     getShowRoads: () => terrainSystem.getShowRoads(),
     setLodDistances: (distances: readonly [number, number, number]) =>
@@ -386,6 +412,7 @@ export function createTerrainDemo(
     getFoliageStats: () => terrainSystem.getFoliageStats(),
     getPoiSites: () => terrainSystem.getPoiSites(),
     getPoiStats: () => terrainSystem.getPoiStats(),
+    getPoiMeshStats: () => terrainSystem.getPoiMeshStats(),
     setPoiDebugConfig: (config: TerrainPoiDebugConfig) =>
       terrainSystem.setPoiDebugConfig(config),
     getPoiDebugConfig: () => terrainSystem.getPoiDebugConfig(),

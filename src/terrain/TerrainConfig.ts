@@ -76,10 +76,7 @@ export interface TerrainConfig {
 }
 
 export type TerrainConfigOverrides = Partial<
-  Omit<
-    TerrainConfig,
-    "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers" | "poi" | "features"
-  >
+  Omit<TerrainConfig, "worldSize" | "totalChunks" | "shape" | "erosion" | "rivers" | "poi" | "features">
 > & {
   shape?: Partial<TerrainShapeConfig>;
   erosion?: Partial<TerrainErosionConfig>;
@@ -104,7 +101,7 @@ export const DEFAULT_TERRAIN_SHAPE_CONFIG: TerrainShapeConfig = Object.freeze({
   detailAmplitude: 6.5,
   moistureFrequency: 0.0018,
   temperatureNoiseFrequency: 0.0023,
-  temperatureNoiseStrength: 0.3
+  temperatureNoiseStrength: 0.3,
 });
 
 export const DEFAULT_TERRAIN_EROSION_CONFIG: TerrainErosionConfig = Object.freeze({
@@ -112,7 +109,7 @@ export const DEFAULT_TERRAIN_EROSION_CONFIG: TerrainErosionConfig = Object.freez
   resolution: 257,
   iterations: 10,
   talusHeight: 1.7,
-  smoothing: 0.14
+  smoothing: 0.14,
 });
 
 export const DEFAULT_TERRAIN_RIVER_CONFIG: TerrainRiverConfig = Object.freeze({
@@ -124,17 +121,17 @@ export const DEFAULT_TERRAIN_RIVER_CONFIG: TerrainRiverConfig = Object.freeze({
   depth: 1.8,
   maxDepth: 5.5,
   minSlope: 0.026,
-  minElevation: 12
+  minElevation: 12,
 });
 
 export const DEFAULT_TERRAIN_POI_CONFIG: TerrainPoiConfig = Object.freeze({
   density: 0.8,
-  spacing: 1.1
+  spacing: 1.1,
 });
 
 export const DEFAULT_TERRAIN_FEATURE_CONFIG: TerrainFeatureConfig = Object.freeze({
   poi: false,
-  roads: false
+  roads: false,
 });
 
 export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
@@ -158,44 +155,41 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   erosion: DEFAULT_TERRAIN_EROSION_CONFIG,
   rivers: DEFAULT_TERRAIN_RIVER_CONFIG,
   poi: DEFAULT_TERRAIN_POI_CONFIG,
-  shape: DEFAULT_TERRAIN_SHAPE_CONFIG
+  shape: DEFAULT_TERRAIN_SHAPE_CONFIG,
 });
 
-export function mergeTerrainConfig(
-  overrides: TerrainConfigOverrides = {}
-): TerrainConfig {
+export function mergeTerrainConfig(overrides: TerrainConfigOverrides = {}): TerrainConfig {
   const worldMin = overrides.worldMin ?? DEFAULT_TERRAIN_CONFIG.worldMin;
   const worldMax = overrides.worldMax ?? DEFAULT_TERRAIN_CONFIG.worldMax;
-  const chunksPerAxis =
-    overrides.chunksPerAxis ?? DEFAULT_TERRAIN_CONFIG.chunksPerAxis;
+  const chunksPerAxis = overrides.chunksPerAxis ?? DEFAULT_TERRAIN_CONFIG.chunksPerAxis;
   const chunkSize = overrides.chunkSize ?? DEFAULT_TERRAIN_CONFIG.chunkSize;
   const worldSize = worldMax - worldMin;
   const totalChunks = chunksPerAxis * chunksPerAxis;
   const erosion = Object.freeze({
     ...DEFAULT_TERRAIN_EROSION_CONFIG,
-    ...overrides.erosion
+    ...overrides.erosion,
   });
   const rivers = Object.freeze({
     ...DEFAULT_TERRAIN_RIVER_CONFIG,
-    ...overrides.rivers
+    ...overrides.rivers,
   });
   const poi = Object.freeze({
     ...DEFAULT_TERRAIN_POI_CONFIG,
-    ...overrides.poi
+    ...overrides.poi,
   });
   const features = Object.freeze({
     ...DEFAULT_TERRAIN_FEATURE_CONFIG,
-    ...overrides.features
+    ...overrides.features,
   });
   const shape = Object.freeze({
     ...DEFAULT_TERRAIN_SHAPE_CONFIG,
-    ...overrides.shape
+    ...overrides.shape,
   });
   const expectedWorldSize = chunksPerAxis * chunkSize;
 
   if (worldSize !== expectedWorldSize) {
     throw new Error(
-      `Expected world size ${expectedWorldSize} from ${chunksPerAxis} chunks at size ${chunkSize}, received ${worldSize}.`
+      `Expected world size ${expectedWorldSize} from ${chunksPerAxis} chunks at size ${chunkSize}, received ${worldSize}.`,
     );
   }
 
@@ -220,14 +214,11 @@ export function mergeTerrainConfig(
     totalChunks,
     chunkSize,
     lodResolutions: DEFAULT_TERRAIN_CONFIG.lodResolutions,
-    lodDistances: (overrides.lodDistances ??
-      DEFAULT_TERRAIN_CONFIG.lodDistances) as TerrainConfig["lodDistances"],
+    lodDistances: (overrides.lodDistances ?? DEFAULT_TERRAIN_CONFIG.lodDistances) as TerrainConfig["lodDistances"],
     foliageLodDistances: (overrides.foliageLodDistances ??
       DEFAULT_TERRAIN_CONFIG.foliageLodDistances) as TerrainConfig["foliageLodDistances"],
-    collisionRadius:
-      overrides.collisionRadius ?? DEFAULT_TERRAIN_CONFIG.collisionRadius,
-    foliageRadius:
-      overrides.foliageRadius ?? DEFAULT_TERRAIN_CONFIG.foliageRadius,
+    collisionRadius: overrides.collisionRadius ?? DEFAULT_TERRAIN_CONFIG.collisionRadius,
+    foliageRadius: overrides.foliageRadius ?? DEFAULT_TERRAIN_CONFIG.foliageRadius,
     waterLevel: overrides.waterLevel ?? DEFAULT_TERRAIN_CONFIG.waterLevel,
     skirtDepth: overrides.skirtDepth ?? DEFAULT_TERRAIN_CONFIG.skirtDepth,
     baseHeight: overrides.baseHeight ?? DEFAULT_TERRAIN_CONFIG.baseHeight,
@@ -236,6 +227,6 @@ export function mergeTerrainConfig(
     erosion,
     rivers,
     poi,
-    shape
+    shape,
   });
 }

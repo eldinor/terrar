@@ -8,7 +8,7 @@ import {
   TerrainLODLevel
 } from "../src/terrain/TerrainConfig";
 import { TerrainFoliagePlanner } from "../src/terrain/TerrainFoliagePlanner";
-import { TerrainPoiPlanner } from "../src/terrain/TerrainPoiPlanner";
+import { getMineResourceKind, TerrainPoiPlanner } from "../src/terrain/TerrainPoiPlanner";
 import { TerrainRoadPlanner } from "../src/terrain/TerrainRoadPlanner";
 import {
   computeTerrainLayerWeights,
@@ -201,6 +201,20 @@ describe("Procedural terrain determinism", () => {
     expect(riverSampleA.sediment).toBeLessThanOrEqual(1);
     expect(Math.max(riverSampleA.sediment, lakeSampleA.sediment)).toBeGreaterThan(0.05);
   });
+
+  it("produces deterministic mineral resource samples", () => {
+    const config = mergeTerrainConfig({ seed: "resource-seed" });
+    const generatorA = new ProceduralGenerator(config);
+    const generatorB = new ProceduralGenerator(config);
+
+    const sampleA = generatorA.sample(128, -96);
+    const sampleB = generatorB.sample(128, -96);
+
+    expect(sampleA.coal).toBeCloseTo(sampleB.coal, 6);
+    expect(sampleA.iron).toBeCloseTo(sampleB.iron, 6);
+    expect(sampleA.copper).toBeCloseTo(sampleB.copper, 6);
+    expect(Math.max(sampleA.coal, sampleA.iron, sampleA.copper)).toBeGreaterThan(0.1);
+  });
 });
 
 describe("Chunk border continuity", () => {
@@ -335,6 +349,94 @@ describe("POI planning", () => {
     expect(villages.length).toBeGreaterThan(0);
     expect(villages.some((site) => site.tags.includes("flood-risk"))).toBe(false);
   });
+
+  it("uses villages instead of dedicated harbor or fishery site types", () => {
+    const config = mergeTerrainConfig({
+      poi: { density: 1.3, spacing: 0.9 },
+      rivers: {
+        lakeThreshold: 0.45,
+        minElevation: 4
+      }
+    });
+    const generator = new ProceduralGenerator(config);
+    const planner = new TerrainPoiPlanner(config, generator);
+    const sites = planner.generateSites();
+
+    const villages = sites.filter((site) => site.kind === "village");
+    expect(villages.length).toBeGreaterThan(0);
+    expect(sites.some((site) => site.kind === "harbor")).toBe(false);
+    expect(sites.some((site) => site.kind === "fishery")).toBe(false);
+  });
+
+  it("keeps mines on flanks instead of summit-like positions", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+    const sites = planner.generateSites();
+
+    const mines = sites.filter((site) => site.kind === "mine");
+    expect(mines.length).toBeGreaterThan(0);
+    expect(mines.some((site) => site.tags.includes("summit"))).toBe(false);
+  });
+
+  it("tags mines with a generated resource type", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+    const sites = planner.generateSites();
+
+    const mines = sites.filter((site) => site.kind === "mine");
+    expect(mines.length).toBeGreaterThan(0);
+    expect(
+      mines.every(
+        (site) =>
+          site.tags.includes("iron") ||
+          site.tags.includes("copper") ||
+          site.tags.includes("coal")
+      )
+    ).toBe(true);
+  });
+
+  it("keeps mine resources reasonably varied when multiple mines exist", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+    const sites = planner.generateSites();
+
+    const mines = sites.filter((site) => site.kind === "mine");
+    expect(mines.length).toBeGreaterThan(0);
+    if (mines.length >= 3) {
+      expect(new Set(mines.map((site) => getMineResourceKind(site))).size).toBeGreaterThan(1);
+    }
+  });
+
+  it("keeps mines off very steep terrain", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+    const sites = planner.generateSites();
+
+    const mines = sites.filter((site) => site.kind === "mine");
+    expect(mines.length).toBeGreaterThan(0);
+    expect(
+      mines.every((site) => estimateSiteSlope(generator, site.x, site.z) < 0.28)
+    ).toBe(true);
+  });
+
+  it("places taverns near travel nodes instead of defensive peaks", () => {
+    const generator = new ProceduralGenerator(DEFAULT_TERRAIN_CONFIG);
+    const planner = new TerrainPoiPlanner(DEFAULT_TERRAIN_CONFIG, generator);
+    const sites = planner.generateSites();
+
+    const taverns = sites.filter((site) => site.kind === "tavern");
+    expect(taverns.length).toBeGreaterThan(0);
+    expect(
+      taverns.some(
+        (site) =>
+          site.tags.includes("crossroads") ||
+          site.tags.includes("pass") ||
+          site.tags.includes("ford")
+      )
+    ).toBe(true);
+    expect(taverns.some((site) => site.tags.includes("defensive"))).toBe(false);
+    expect(taverns.some((site) => site.tags.includes("prominent"))).toBe(false);
+  });
 });
 
 describe("Road planning", () => {
@@ -361,6 +463,26 @@ describe("Road planning", () => {
 
     expect(roads.length).toBeGreaterThan(0);
     expect(roads.some((road) => road.points.length >= 2)).toBe(true);
+  });
+
+  it("adds a deliberate approach segment near poi endpoints", () => {
+    const config = DEFAULT_TERRAIN_CONFIG;
+    const generator = new ProceduralGenerator(config);
+    const pois = new TerrainPoiPlanner(config, generator).generateSites();
+    const roads = new TerrainRoadPlanner(config, generator).generateRoads(pois);
+    const road = roads.find((candidate) => candidate.points.length >= 4) ?? roads[0];
+    const fromPoi = pois.find((poi) => poi.id === road.fromPoiId)!;
+    const toPoi = pois.find((poi) => poi.id === road.toPoiId)!;
+
+    const startApproachDistances = road.points
+      .slice(1, Math.min(4, road.points.length - 1))
+      .map((point) => Math.hypot(point.x - fromPoi.x, point.z - fromPoi.z));
+    const endApproachDistances = road.points
+      .slice(Math.max(1, road.points.length - 4), road.points.length - 1)
+      .map((point) => Math.hypot(point.x - toPoi.x, point.z - toPoi.z));
+
+    expect(startApproachDistances.some((distance) => distance > 4 && distance < 14)).toBe(true);
+    expect(endApproachDistances.some((distance) => distance > 4 && distance < 14)).toBe(true);
   });
 
   it("flattens chunk terrain near planned roads", () => {
@@ -405,6 +527,53 @@ describe("Road planning", () => {
     const index = sampleZ * unshapedGrid.resolution + sampleX;
 
     expect(shapedGrid.heights[index]).toBeLessThan(unshapedGrid.heights[index]);
+  });
+
+  it("flattens chunk terrain near poi footprints", () => {
+    const config = DEFAULT_TERRAIN_CONFIG;
+    const generator = new ProceduralGenerator(config);
+    const site = {
+      id: "tavern-test",
+      kind: "tavern" as const,
+      x: 0,
+      y: generator.sample(0, 0).height,
+      z: 0,
+      score: 1,
+      radius: 120,
+      tags: ["crossroads"] as const
+    };
+    const unshapedChunk = new TerrainChunkData(4, 4, config, generator);
+    const shapedChunk = new TerrainChunkData(4, 4, config, generator, [], [site]);
+    const unshapedGrid = unshapedChunk.getGrid(0);
+    const shapedGrid = shapedChunk.getGrid(0);
+    const sampleX = Math.round((site.x - shapedChunk.minX) / shapedGrid.step);
+    const sampleZ = Math.round((site.z - shapedChunk.minZ) / shapedGrid.step);
+    const index = sampleZ * shapedGrid.resolution + sampleX;
+
+    expect(shapedGrid.heights[index]).toBeLessThan(unshapedGrid.heights[index]);
+  });
+
+  it("suppresses foliage inside poi footprints", () => {
+    const config = DEFAULT_TERRAIN_CONFIG;
+    const generator = new ProceduralGenerator(config);
+    const site = {
+      id: "village-test",
+      kind: "village" as const,
+      x: 0,
+      y: generator.sample(0, 0).height,
+      z: 0,
+      score: 1,
+      radius: 120,
+      tags: ["flat"] as const
+    };
+    const chunk = new TerrainChunkData(4, 4, config, generator, [], [site]);
+    const planner = new TerrainFoliagePlanner(config, config.seed);
+
+    const candidates = planner.generateCandidates(chunk);
+
+    expect(
+      candidates.some((candidate) => Math.hypot(candidate.x - site.x, candidate.z - site.z) < 18)
+    ).toBe(false);
   });
 });
 
@@ -512,4 +681,19 @@ function findStrongLakePoint(
   }
 
   return { x: best.x, z: best.z };
+}
+
+function estimateSiteSlope(
+  generator: ProceduralGenerator,
+  x: number,
+  z: number,
+  step = 12
+): number {
+  const left = generator.sample(x - step, z).height;
+  const right = generator.sample(x + step, z).height;
+  const down = generator.sample(x, z - step).height;
+  const up = generator.sample(x, z + step).height;
+  const gradX = (right - left) / (step * 2);
+  const gradZ = (up - down) / (step * 2);
+  return Math.sqrt(gradX * gradX + gradZ * gradZ);
 }

@@ -13,9 +13,11 @@ import {
   ChunkBuildWorkerResponse,
   PrepareChunkBuildRequest,
   SerializedChunkMeshData,
+  SerializedTerrainPoi,
   SerializedTerrainRoad
 } from "./TerrainBuildMessages";
 import { TerrainChunkMeshData, TerrainMeshBuilder } from "./TerrainMeshBuilder";
+import { TerrainPoi } from "./TerrainPoiPlanner";
 import { TerrainRoad } from "./TerrainRoadPlanner";
 
 export interface TerrainChunkBuildProgress {
@@ -64,6 +66,7 @@ export class TerrainChunkBuildCoordinator {
 
   async buildChunks(
     config: TerrainConfig,
+    poiSites: readonly TerrainPoi[],
     roads: readonly TerrainRoad[],
     snapshot: PackedTerrainSnapshot,
     cameraPosition: Vector3 | null,
@@ -84,6 +87,7 @@ export class TerrainChunkBuildCoordinator {
       queue.forEach((job, index) => {
         const meshes = buildChunkSynchronously(
           config,
+          poiSites,
           roads,
           snapshot,
           job.chunkX,
@@ -102,7 +106,7 @@ export class TerrainChunkBuildCoordinator {
     this.activeBuildHandlers?.resolve();
     this.activeBuildHandlers = null;
     this.resetWorkers();
-    await this.prepareWorkers(config, roads, snapshot, buildVersion);
+    await this.prepareWorkers(config, poiSites, roads, snapshot, buildVersion);
 
     return new Promise<void>((resolve, reject) => {
       this.activeBuildHandlers = {
@@ -163,10 +167,12 @@ export class TerrainChunkBuildCoordinator {
 
   private async prepareWorkers(
     config: TerrainConfig,
+    poiSites: readonly TerrainPoi[],
     roads: readonly TerrainRoad[],
     snapshot: PackedTerrainSnapshot,
     buildVersion: number
   ): Promise<void> {
+    const serializedPoiSites = serializePoiSites(poiSites);
     const serializedRoads = serializeRoads(roads);
     const serializedSnapshot = snapshot;
     this.workers.forEach((state) => {
@@ -184,6 +190,7 @@ export class TerrainChunkBuildCoordinator {
         type: "prepareChunkBuild",
         buildVersion,
         config,
+        poiSites: serializedPoiSites,
         roads: serializedRoads,
         snapshot: serializedSnapshot
       };
@@ -339,6 +346,19 @@ function serializeRoads(roads: readonly TerrainRoad[]): SerializedTerrainRoad[] 
   }));
 }
 
+function serializePoiSites(poiSites: readonly TerrainPoi[]): SerializedTerrainPoi[] {
+  return poiSites.map((site) => ({
+    id: site.id,
+    kind: site.kind,
+    x: site.x,
+    y: site.y,
+    z: site.z,
+    score: site.score,
+    radius: site.radius,
+    tags: [...site.tags]
+  }));
+}
+
 function deserializeChunkMeshData(mesh: SerializedChunkMeshData): TerrainChunkMeshData {
   return {
     positions: new Float32Array(mesh.positions),
@@ -346,12 +366,15 @@ function deserializeChunkMeshData(mesh: SerializedChunkMeshData): TerrainChunkMe
     normals: new Float32Array(mesh.normals),
     uvs: new Float32Array(mesh.uvs),
     uvs2: new Float32Array(mesh.uvs2),
+    uvs3: new Float32Array(mesh.uvs3),
+    uvs4: new Float32Array(mesh.uvs4),
     colors: new Float32Array(mesh.colors)
   };
 }
 
 function buildChunkSynchronously(
   config: TerrainConfig,
+  poiSites: readonly TerrainPoi[],
   roads: readonly TerrainRoad[],
   snapshot: PackedTerrainSnapshot,
   chunkX: number,
@@ -359,7 +382,14 @@ function buildChunkSynchronously(
   lods: readonly TerrainLODLevel[]
 ): TerrainChunkMeshData[] {
   const generator = new ProceduralGenerator(config, unpackTerrainSnapshot(snapshot));
-  const chunkData = new TerrainChunkData(chunkX, chunkZ, config, generator, roads);
+  const chunkData = new TerrainChunkData(
+    chunkX,
+    chunkZ,
+    config,
+    generator,
+    roads,
+    poiSites
+  );
   return lods.map((lod) => TerrainMeshBuilder.createChunkMeshData(chunkData, lod, config));
 }
 

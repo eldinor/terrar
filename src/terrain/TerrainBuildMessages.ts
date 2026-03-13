@@ -48,6 +48,9 @@ export interface PackedTerrainSnapshotMessage {
     readonly lakeField: PackedTerrainSnapshotFieldMessage;
     readonly lakeSurfaceField: PackedTerrainSnapshotFieldMessage;
     readonly sedimentField: PackedTerrainSnapshotFieldMessage;
+    readonly coalField: PackedTerrainSnapshotFieldMessage;
+    readonly ironField: PackedTerrainSnapshotFieldMessage;
+    readonly copperField: PackedTerrainSnapshotFieldMessage;
   };
 }
 
@@ -74,6 +77,7 @@ export interface PrepareChunkBuildRequest {
   readonly type: "prepareChunkBuild";
   readonly buildVersion: number;
   readonly config: TerrainConfig;
+  readonly poiSites: readonly SerializedTerrainPoi[];
   readonly roads: readonly SerializedTerrainRoad[];
   readonly snapshot: PackedTerrainSnapshotMessage;
 }
@@ -98,6 +102,8 @@ export interface SerializedChunkMeshData {
   readonly normals: ArrayBuffer;
   readonly uvs: ArrayBuffer;
   readonly uvs2: ArrayBuffer;
+  readonly uvs3: ArrayBuffer;
+  readonly uvs4: ArrayBuffer;
   readonly colors: ArrayBuffer;
 }
 

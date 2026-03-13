@@ -4,15 +4,12 @@ import type {
   TerrainFeatureConfig,
   TerrainPoiConfig,
   TerrainRiverConfig,
-  TerrainShapeConfig
+  TerrainShapeConfig,
 } from "./terrain/TerrainConfig";
-import type { TerrainPoiKind } from "./terrain/TerrainPoiPlanner";
+import type { TerrainMineResource, TerrainPoiKind } from "./terrain/TerrainPoiPlanner";
 import type { TerrainPoiDebugConfig } from "./terrain/TerrainPoiSystem";
 import type { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
-import {
-  TerrainDebugViewMode,
-  TerrainLayerThresholds
-} from "./terrain/materials";
+import { TerrainDebugViewMode, TerrainLayerThresholds } from "./terrain/materials";
 import { createTerrainDemo } from "./main";
 
 interface TerrainPreset {
@@ -23,12 +20,15 @@ interface TerrainPreset {
 
 interface PresetFeatureState {
   readonly poiDebug: TerrainPoiDebugConfig;
+  readonly hidePoiMarkerMeshes: boolean;
+  readonly hidePoiLabels: boolean;
+  readonly showPoiFootprints: boolean;
 }
 
 const BUILTIN_PRESETS: readonly TerrainPreset[] = [
   {
     name: "Default",
-    config: {}
+    config: {},
   },
   {
     name: "Archipelago",
@@ -41,9 +41,9 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
         radialFalloffStrength: 0.86,
         mountainAmplitude: 88,
         hillAmplitude: 34,
-        detailAmplitude: 5
-      }
-    }
+        detailAmplitude: 5,
+      },
+    },
   },
   {
     name: "Highlands",
@@ -56,9 +56,9 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
         radialFalloffStrength: 0.48,
         mountainAmplitude: 154,
         hillAmplitude: 54,
-        detailAmplitude: 10
-      }
-    }
+        detailAmplitude: 10,
+      },
+    },
   },
   {
     name: "Basin",
@@ -71,10 +71,10 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
         radialFalloffStrength: 0.92,
         mountainAmplitude: 76,
         hillAmplitude: 24,
-        detailAmplitude: 4
-      }
-    }
-  }
+        detailAmplitude: 4,
+      },
+    },
+  },
 ] as const;
 
 const SAVED_PRESETS_KEY = "terrar.saved-presets";
@@ -175,16 +175,16 @@ function renderHud(): void {
     `poi: ${poi.total} | roads: ${roads.totalRoads} | ${workerText}${buildText}`;
 }
 
+renderHud();
+renderPanel();
+renderFeaturePanel();
+window.setInterval(() => {
   renderHud();
-  renderPanel();
-  renderFeaturePanel();
-  window.setInterval(() => {
-    renderHud();
-    updateFeatureBuildStatus();
-  }, 250);
-  demo.subscribeBuildStatus((status) => {
-    buildStatus = status;
-    renderHud();
+  updateFeatureBuildStatus();
+}, 250);
+demo.subscribeBuildStatus((status) => {
+  buildStatus = status;
+  renderHud();
   updateFeatureBuildStatus();
 });
 
@@ -242,23 +242,46 @@ function renderFeaturePanel(): void {
         draftConfig.features.roads = false;
       }
       renderFeaturePanel();
-    })
+    }),
   );
   featurePanel.appendChild(
-    createCheckbox("Build Roads", draftConfig.features.roads, (checked) => {
-      draftConfig.features.roads = checked && draftConfig.features.poi;
-    }, !draftConfig.features.poi)
+    createCheckbox(
+      "Build Roads",
+      draftConfig.features.roads,
+      (checked) => {
+        draftConfig.features.roads = checked && draftConfig.features.poi;
+      },
+      !draftConfig.features.poi,
+    ),
   );
   featurePanel.appendChild(createFeatureBuildStatus());
   featurePanel.appendChild(
     createButton("Apply Features", () => {
       return applyDraftToWorld();
-    })
+    }),
   );
 
   if (draftConfig.features.poi) {
     featurePanel.appendChild(createDivider());
     featurePanel.appendChild(createSectionLabel("POI Debug"));
+    featurePanel.appendChild(
+      createCheckbox("Hide Marker Meshes", draftConfig.hidePoiMarkerMeshes, (checked) => {
+        draftConfig.hidePoiMarkerMeshes = checked;
+        demo.setPoiMarkerMeshesVisible(!checked);
+      }),
+    );
+    featurePanel.appendChild(
+      createCheckbox("Hide POI Labels", draftConfig.hidePoiLabels, (checked) => {
+        draftConfig.hidePoiLabels = checked;
+        demo.setPoiLabelsVisible(!checked);
+      }),
+    );
+    featurePanel.appendChild(
+      createCheckbox("Show Footprints", draftConfig.showPoiFootprints, (checked) => {
+        draftConfig.showPoiFootprints = checked;
+        demo.setShowPoiFootprints(checked);
+      }),
+    );
     featurePanel.appendChild(createPoiDebugControls());
     featurePanel.appendChild(createPoiStatsRow());
   }
@@ -270,92 +293,92 @@ function renderRuntimeTab(): void {
     createSlider("Water", -24, 32, 1, draftConfig.waterLevel, (value) => {
       draftConfig.waterLevel = value;
       demo.setWaterLevel(value);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Water Opacity", 0.1, 1, 0.01, draftConfig.water.opacity, (value) => {
       draftConfig.water.opacity = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Shore Fade", 1, 32, 0.5, draftConfig.water.shoreFadeDistance, (value) => {
       draftConfig.water.shoreFadeDistance = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Wave Scale X", 0.002, 0.05, 0.001, draftConfig.water.waveScaleX, (value) => {
       draftConfig.water.waveScaleX = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Wave Scale Z", 0.002, 0.05, 0.001, draftConfig.water.waveScaleZ, (value) => {
       draftConfig.water.waveScaleZ = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Wave Speed X", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedX, (value) => {
       draftConfig.water.waveSpeedX = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Wave Speed Z", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedZ, (value) => {
       draftConfig.water.waveSpeedZ = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("River Discharge", 0.4, 1.8, 0.05, draftConfig.water.riverDischargeStrength, (value) => {
       draftConfig.water.riverDischargeStrength = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("River Mesh Cutoff", 0.05, 0.6, 0.01, draftConfig.water.riverMeshThreshold, (value) => {
       draftConfig.water.riverMeshThreshold = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("River Mesh Min Width", 0, 12, 0.5, draftConfig.water.riverMeshMinWidth, (value) => {
       draftConfig.water.riverMeshMinWidth = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Lake Mesh Cutoff", 0.02, 0.3, 0.01, draftConfig.water.lakeMeshThreshold, (value) => {
       draftConfig.water.lakeMeshThreshold = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Inland Res", 33, 513, 32, draftConfig.water.inlandMeshResolution, (value) => {
       draftConfig.water.inlandMeshResolution = clampErosionResolution(value);
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Inland Smooth", 0, 6, 1, draftConfig.water.inlandSmoothingPasses, (value) => {
       draftConfig.water.inlandSmoothingPasses = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(createWaterDebugControl());
   panel.appendChild(
     createColorInput("Shallow Color", draftConfig.water.shallowColor, (value) => {
       draftConfig.water.shallowColor = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(
     createColorInput("Deep Color", draftConfig.water.deepColor, (value) => {
       draftConfig.water.deepColor = value;
       applyDraftWaterConfig();
-    })
+    }),
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Camera Radius"));
@@ -364,67 +387,46 @@ function renderRuntimeTab(): void {
       draftConfig.showFoliage = checked;
       demo.setShowFoliage(checked);
       renderHud();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Collision", 80, 480, 10, draftConfig.collisionRadius, (value) => {
       draftConfig.collisionRadius = value;
       demo.setCollisionRadius(value);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Foliage", 120, 2000, 10, draftConfig.foliageRadius, (value) => {
       draftConfig.foliageRadius = value;
       demo.setFoliageRadius(value);
-    })
+    }),
   );
   panel.appendChild(
-    createSlider(
-      "LOD0",
-      80,
-      280,
-      10,
-      draftConfig.lodDistances[0],
-      (value) => {
-        draftConfig.lodDistances[0] = value;
-        if (draftConfig.lodDistances[1] <= value) {
-          draftConfig.lodDistances[1] = value + 10;
-        }
-        if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
-          draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
-        }
-        demo.setLodDistances(draftConfig.lodDistances);
+    createSlider("LOD0", 80, 280, 10, draftConfig.lodDistances[0], (value) => {
+      draftConfig.lodDistances[0] = value;
+      if (draftConfig.lodDistances[1] <= value) {
+        draftConfig.lodDistances[1] = value + 10;
       }
-    )
+      if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
+        draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
+      }
+      demo.setLodDistances(draftConfig.lodDistances);
+    }),
   );
   panel.appendChild(
-    createSlider(
-      "LOD1",
-      160,
-      420,
-      10,
-      draftConfig.lodDistances[1],
-      (value) => {
-        draftConfig.lodDistances[1] = Math.max(value, draftConfig.lodDistances[0] + 10);
-        if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
-          draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
-        }
-        demo.setLodDistances(draftConfig.lodDistances);
+    createSlider("LOD1", 160, 420, 10, draftConfig.lodDistances[1], (value) => {
+      draftConfig.lodDistances[1] = Math.max(value, draftConfig.lodDistances[0] + 10);
+      if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
+        draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
       }
-    )
+      demo.setLodDistances(draftConfig.lodDistances);
+    }),
   );
   panel.appendChild(
-    createSlider(
-      "LOD2",
-      260,
-      700,
-      10,
-      draftConfig.lodDistances[2],
-      (value) => {
-        draftConfig.lodDistances[2] = Math.max(value, draftConfig.lodDistances[1] + 10);
-        demo.setLodDistances(draftConfig.lodDistances);
-      }
-    )
+    createSlider("LOD2", 260, 700, 10, draftConfig.lodDistances[2], (value) => {
+      draftConfig.lodDistances[2] = Math.max(value, draftConfig.lodDistances[1] + 10);
+      demo.setLodDistances(draftConfig.lodDistances);
+    }),
   );
   panel.appendChild(createDebugModeControl());
 }
@@ -435,178 +437,208 @@ function renderMaterialTab(): void {
     createCheckbox("Use Generated Textures", draftConfig.useGeneratedTextures, (checked) => {
       draftConfig.useGeneratedTextures = checked;
       runAsyncTask(demo.setUseGeneratedTextures(checked));
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Rock Start", 0.05, 0.9, 0.01, draftConfig.materialThresholds.rockSlopeStart, (value) => {
       draftConfig.materialThresholds.rockSlopeStart = Math.min(
         value,
-        draftConfig.materialThresholds.rockSlopeFull - 0.02
+        draftConfig.materialThresholds.rockSlopeFull - 0.02,
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Rock Full", 0.1, 1, 0.01, draftConfig.materialThresholds.rockSlopeFull, (value) => {
       draftConfig.materialThresholds.rockSlopeFull = Math.max(
         value,
-        draftConfig.materialThresholds.rockSlopeStart + 0.02
+        draftConfig.materialThresholds.rockSlopeStart + 0.02,
       );
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Grass Max Slope", 0.1, 0.9, 0.01, draftConfig.materialThresholds.grassMaxSlope, (value) => {
       draftConfig.materialThresholds.grassMaxSlope = value;
       demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    }),
   );
   panel.appendChild(
-    createSlider("Snow Start", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.snowStartHeight, (value) => {
-      draftConfig.materialThresholds.snowStartHeight = Math.min(
-        value,
-        draftConfig.materialThresholds.snowFullHeight - 1
-      );
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    createSlider(
+      "Snow Start",
+      draftConfig.baseHeight,
+      draftConfig.maxHeight,
+      1,
+      draftConfig.materialThresholds.snowStartHeight,
+      (value) => {
+        draftConfig.materialThresholds.snowStartHeight = Math.min(
+          value,
+          draftConfig.materialThresholds.snowFullHeight - 1,
+        );
+        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      },
+    ),
   );
   panel.appendChild(
-    createSlider("Snow Full", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.snowFullHeight, (value) => {
-      draftConfig.materialThresholds.snowFullHeight = Math.max(
-        value,
-        draftConfig.materialThresholds.snowStartHeight + 1
-      );
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    createSlider(
+      "Snow Full",
+      draftConfig.baseHeight,
+      draftConfig.maxHeight,
+      1,
+      draftConfig.materialThresholds.snowFullHeight,
+      (value) => {
+        draftConfig.materialThresholds.snowFullHeight = Math.max(
+          value,
+          draftConfig.materialThresholds.snowStartHeight + 1,
+        );
+        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      },
+    ),
   );
   panel.appendChild(
-    createSlider("Dirt Low", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.dirtLowHeight, (value) => {
-      draftConfig.materialThresholds.dirtLowHeight = Math.min(
-        value,
-        draftConfig.materialThresholds.dirtHighHeight - 1
-      );
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    createSlider(
+      "Dirt Low",
+      draftConfig.baseHeight,
+      draftConfig.maxHeight,
+      1,
+      draftConfig.materialThresholds.dirtLowHeight,
+      (value) => {
+        draftConfig.materialThresholds.dirtLowHeight = Math.min(
+          value,
+          draftConfig.materialThresholds.dirtHighHeight - 1,
+        );
+        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      },
+    ),
   );
   panel.appendChild(
-    createSlider("Dirt High", draftConfig.baseHeight, draftConfig.maxHeight, 1, draftConfig.materialThresholds.dirtHighHeight, (value) => {
-      draftConfig.materialThresholds.dirtHighHeight = Math.max(
-        value,
-        draftConfig.materialThresholds.dirtLowHeight + 1
-      );
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    })
+    createSlider(
+      "Dirt High",
+      draftConfig.baseHeight,
+      draftConfig.maxHeight,
+      1,
+      draftConfig.materialThresholds.dirtHighHeight,
+      (value) => {
+        draftConfig.materialThresholds.dirtHighHeight = Math.max(
+          value,
+          draftConfig.materialThresholds.dirtLowHeight + 1,
+        );
+        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+      },
+    ),
   );
   panel.appendChild(
     createSlider("Grass Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.grassScale, (value) => {
       draftConfig.materialScales.grassScale = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Dirt Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.dirtScale, (value) => {
       draftConfig.materialScales.dirtScale = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Sand Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.sandScale, (value) => {
       draftConfig.materialScales.sandScale = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Rock Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.rockScale, (value) => {
       draftConfig.materialScales.rockScale = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Snow Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.snowScale, (value) => {
       draftConfig.materialScales.snowScale = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Macro Scale", 0.001, 0.03, 0.001, draftConfig.materialScales.macroScale, (value) => {
       draftConfig.materialScales.macroScale = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Anti-Tile", 0, 1, 0.01, draftConfig.materialScales.antiTileStrength, (value) => {
       draftConfig.materialScales.antiTileStrength = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Blend Sharpness", 0.5, 3, 0.05, draftConfig.blendSharpness, (value) => {
       draftConfig.blendSharpness = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Sediment", 0, 2, 0.05, draftConfig.sedimentStrength, (value) => {
       draftConfig.sedimentStrength = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Sediment Sand", 0, 1, 0.05, draftConfig.sedimentSandBias, (value) => {
       draftConfig.sedimentSandBias = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Small River Tint", 0, 1.5, 0.05, draftConfig.smallRiverTintStrength, (value) => {
       draftConfig.smallRiverTintStrength = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Small River Bright", 0.5, 1.8, 0.05, draftConfig.smallRiverTintBrightness, (value) => {
       draftConfig.smallRiverTintBrightness = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Small River Sat", 0, 1.8, 0.05, draftConfig.smallRiverTintSaturation, (value) => {
       draftConfig.smallRiverTintSaturation = value;
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Beach Start", 0, 8, 0.5, draftConfig.shorelineStartOffset, (value) => {
       draftConfig.shorelineStartOffset = Math.min(value, draftConfig.shorelineEndOffset - 0.5);
       applyDraftMaterialConfig();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Beach End", 2, 40, 0.5, draftConfig.shorelineEndOffset, (value) => {
       draftConfig.shorelineEndOffset = Math.max(value, draftConfig.shorelineStartOffset + 0.5);
       applyDraftMaterialConfig();
-    })
+    }),
   );
 }
 
 function renderWorldTab(): void {
   panel.appendChild(createSectionLabel("Regenerate"));
-  panel.appendChild(createTextInput("Seed", draftConfig.seed, (value) => {
-    draftConfig.seed = value.trim() === "" ? "1337" : value;
-  }));
+  panel.appendChild(
+    createTextInput("Seed", draftConfig.seed, (value) => {
+      draftConfig.seed = value.trim() === "" ? "1337" : value;
+    }),
+  );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("World Size"));
   panel.appendChild(
     createSlider("Chunks / Axis", 6, 16, 1, draftConfig.chunksPerAxis, (value) => {
       draftConfig.chunksPerAxis = value;
       syncDraftWorldBounds();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Chunk Size", 64, 256, 16, draftConfig.chunkSize, (value) => {
       draftConfig.chunkSize = value;
       syncDraftWorldBounds();
-    })
+    }),
   );
   panel.appendChild(createInfoRow("World Size", String(draftConfig.worldSize)));
   panel.appendChild(
@@ -617,148 +649,148 @@ function renderWorldTab(): void {
       demo.setLodDistances(draftConfig.lodDistances);
       demo.setWaterConfig(draftConfig.water);
       renderPanel();
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Base Height", -64, 32, 1, draftConfig.baseHeight, (value) => {
       draftConfig.baseHeight = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Max Height", 120, 320, 5, draftConfig.maxHeight, (value) => {
       draftConfig.maxHeight = Math.max(value, draftConfig.baseHeight + 40);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Continent Amp", 24, 120, 2, draftConfig.shape.continentAmplitude, (value) => {
       draftConfig.shape.continentAmplitude = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Continent Freq", 0.0004, 0.0025, 0.00005, draftConfig.shape.continentFrequency, (value) => {
       draftConfig.shape.continentFrequency = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Radial Falloff", 0.1, 1.2, 0.01, draftConfig.shape.radialFalloffStrength, (value) => {
       draftConfig.shape.radialFalloffStrength = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Mountain Amp", 40, 220, 2, draftConfig.shape.mountainAmplitude, (value) => {
       draftConfig.shape.mountainAmplitude = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Mountain Freq", 0.003, 0.02, 0.0005, draftConfig.shape.mountainFrequency, (value) => {
       draftConfig.shape.mountainFrequency = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Hill Amp", 8, 80, 1, draftConfig.shape.hillAmplitude, (value) => {
       draftConfig.shape.hillAmplitude = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Hill Freq", 0.002, 0.015, 0.0005, draftConfig.shape.hillFrequency, (value) => {
       draftConfig.shape.hillFrequency = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Detail Amp", 0, 18, 0.5, draftConfig.shape.detailAmplitude, (value) => {
       draftConfig.shape.detailAmplitude = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Detail Freq", 0.01, 0.08, 0.001, draftConfig.shape.detailFrequency, (value) => {
       draftConfig.shape.detailFrequency = value;
-    })
+    }),
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Erosion"));
   panel.appendChild(
     createCheckbox("Enable Erosion", draftConfig.erosion.enabled, (checked) => {
       draftConfig.erosion.enabled = checked;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Erosion Grid", 65, 513, 32, draftConfig.erosion.resolution, (value) => {
       draftConfig.erosion.resolution = clampErosionResolution(value);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Iterations", 0, 48, 1, draftConfig.erosion.iterations, (value) => {
       draftConfig.erosion.iterations = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Talus Height", 0.25, 4, 0.05, draftConfig.erosion.talusHeight, (value) => {
       draftConfig.erosion.talusHeight = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Smoothing", 0.02, 0.45, 0.01, draftConfig.erosion.smoothing, (value) => {
       draftConfig.erosion.smoothing = value;
-    })
+    }),
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Rivers"));
   panel.appendChild(
     createCheckbox("Enable Rivers", draftConfig.rivers.enabled, (checked) => {
       draftConfig.rivers.enabled = checked;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("River Grid", 65, 513, 32, draftConfig.rivers.resolution, (value) => {
       draftConfig.rivers.resolution = clampErosionResolution(value);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Flow Threshold", 0.45, 0.95, 0.01, draftConfig.rivers.flowThreshold, (value) => {
       draftConfig.rivers.flowThreshold = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Bank Width", 0.2, 1, 0.02, draftConfig.rivers.bankStrength, (value) => {
       draftConfig.rivers.bankStrength = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Lake Threshold", 0.2, 3, 0.05, draftConfig.rivers.lakeThreshold, (value) => {
       draftConfig.rivers.lakeThreshold = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("River Depth", 0.2, 6, 0.1, draftConfig.rivers.depth, (value) => {
       draftConfig.rivers.depth = Math.min(value, draftConfig.rivers.maxDepth);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Max Depth", 1, 14, 0.25, draftConfig.rivers.maxDepth, (value) => {
       draftConfig.rivers.maxDepth = Math.max(value, draftConfig.rivers.depth);
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Min Slope", 0, 0.12, 0.002, draftConfig.rivers.minSlope, (value) => {
       draftConfig.rivers.minSlope = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("Min Elevation", 0, 32, 1, draftConfig.rivers.minElevation, (value) => {
       draftConfig.rivers.minElevation = value;
-    })
+    }),
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("POI"));
   panel.appendChild(
-    createSlider("POI Density", 0.35, 1.5, 0.05, draftConfig.poi.density, (value) => {
+    createSlider("POI Density", 0.35, 3, 0.05, draftConfig.poi.density, (value) => {
       draftConfig.poi.density = value;
-    })
+    }),
   );
   panel.appendChild(
     createSlider("POI Spacing", 0.7, 1.8, 0.05, draftConfig.poi.spacing, (value) => {
       draftConfig.poi.spacing = value;
-    })
+    }),
   );
   panel.appendChild(createDivider());
   panel.appendChild(createActionButtons());
@@ -783,7 +815,7 @@ function createTabBar(): HTMLElement {
     ["runtime", "Runtime"],
     ["material", "Material"],
     ["world", "World"],
-    ["presets", "Presets"]
+    ["presets", "Presets"],
   ];
 
   tabs.forEach(([tab, label]) => {
@@ -793,8 +825,7 @@ function createTabBar(): HTMLElement {
     button.style.padding = "7px 6px";
     button.style.borderRadius = "8px";
     button.style.border = "1px solid rgba(255,255,255,0.16)";
-    button.style.background =
-      activeTab === tab ? "rgba(56, 93, 123, 0.95)" : "rgba(18, 29, 39, 0.95)";
+    button.style.background = activeTab === tab ? "rgba(56, 93, 123, 0.95)" : "rgba(18, 29, 39, 0.95)";
     button.style.color = "#f4edc9";
     button.style.cursor = "pointer";
     button.style.minWidth = "0";
@@ -849,6 +880,9 @@ function createPresetControls(): HTMLElement {
     draftConfig = mergeDraftWithOverrides(buildDraftConfig(), preset.config);
     if (preset.featureState) {
       draftConfig.poiDebug = clonePoiDebugConfig(preset.featureState.poiDebug);
+      draftConfig.hidePoiMarkerMeshes = preset.featureState.hidePoiMarkerMeshes ?? draftConfig.hidePoiMarkerMeshes;
+      draftConfig.hidePoiLabels = preset.featureState.hidePoiLabels ?? draftConfig.hidePoiLabels;
+      draftConfig.showPoiFootprints = preset.featureState.showPoiFootprints ?? draftConfig.showPoiFootprints;
     }
     return applyDraftToWorld();
   });
@@ -864,8 +898,11 @@ function createPresetControls(): HTMLElement {
       name,
       config: buildTerrainOverridesFromDraft(),
       featureState: {
-        poiDebug: clonePoiDebugConfig(draftConfig.poiDebug)
-      }
+        poiDebug: clonePoiDebugConfig(draftConfig.poiDebug),
+        hidePoiMarkerMeshes: draftConfig.hidePoiMarkerMeshes,
+        hidePoiLabels: draftConfig.hidePoiLabels,
+        showPoiFootprints: draftConfig.showPoiFootprints,
+      },
     });
     savePresets(customPresets);
     presetOptions = getPresetOptions();
@@ -918,7 +955,11 @@ function createDebugModeControl(): HTMLElement {
     ["Lake", TerrainDebugViewMode.Lake],
     ["Sediment", TerrainDebugViewMode.Sediment],
     ["River Width", TerrainDebugViewMode.RiverWidth],
-    ["Water Transition", TerrainDebugViewMode.WaterTransition]
+    ["Water Transition", TerrainDebugViewMode.WaterTransition],
+    ["Resource", TerrainDebugViewMode.Resource],
+    ["Coal", TerrainDebugViewMode.Coal],
+    ["Iron", TerrainDebugViewMode.Iron],
+    ["Copper", TerrainDebugViewMode.Copper],
   ];
 
   modes.forEach(([label, value]) => {
@@ -942,7 +983,7 @@ function createCheckbox(
   label: string,
   initialValue: boolean,
   onChange: (checked: boolean) => void,
-  disabled = false
+  disabled = false,
 ): HTMLElement {
   const row = document.createElement("label");
   row.style.display = "flex";
@@ -981,13 +1022,13 @@ function createActionButtons(): HTMLElement {
   wrap.appendChild(
     createButton("Rebuild Terrain", () => {
       return applyDraftToWorld();
-    })
+    }),
   );
   wrap.appendChild(
     createButton("Reset Draft", () => {
       draftConfig = buildDraftConfig();
       renderPanel();
-    })
+    }),
   );
 
   return wrap;
@@ -995,6 +1036,7 @@ function createActionButtons(): HTMLElement {
 
 function createPoiStatsRow(): HTMLElement {
   const stats = demo.getPoiStats();
+  const meshStats = demo.getPoiMeshStats();
   const row = document.createElement("div");
   row.style.marginTop = "8px";
   row.style.padding = "6px 8px";
@@ -1004,8 +1046,9 @@ function createPoiStatsRow(): HTMLElement {
   row.style.color = "#9cb3c3";
   row.style.whiteSpace = "pre-wrap";
   row.textContent =
-    `POI ${stats.total}: V ${stats.villages} | H ${stats.harbors} | ` +
-    `F ${stats.hillforts} | M ${stats.mines}`;
+    `POI ${stats.total}: V ${stats.villages} | ` +
+    `T ${stats.taverns} | M ${stats.mines}\n` +
+    `Meshes ${meshStats.enabled}/${meshStats.total}`;
   return row;
 }
 
@@ -1055,10 +1098,7 @@ function updateFeatureBuildStatus(): void {
     `Chunk Workers: ${formatDuration(buildProfile.lastChunkWorkerBuildMs)}\n` +
     `Mesh Apply: ${formatDuration(buildProfile.lastMeshApplyMs)}\n` +
     `Total Rebuild: ${formatDuration(buildProfile.lastTotalRebuildMs)}`;
-  const progress =
-    buildStatus.phase === "idle"
-      ? ""
-      : `\n${buildStatus.message}`;
+  const progress = buildStatus.phase === "idle" ? "" : `\n${buildStatus.message}`;
   featureBuildStatusText.textContent = `${summary}\n${workerLine}\n${workerDetail}${profileDetail}${progress}`;
 }
 
@@ -1081,33 +1121,52 @@ function createPoiDebugControls(): HTMLElement {
     createCheckbox("Show Scores", draftConfig.poiDebug.showScores, (checked) => {
       draftConfig.poiDebug.showScores = checked;
       demo.setPoiDebugConfig(draftConfig.poiDebug);
-    })
+    }),
   );
   wrap.appendChild(
     createCheckbox("Show Radii", draftConfig.poiDebug.showRadii, (checked) => {
       draftConfig.poiDebug.showRadii = checked;
       demo.setPoiDebugConfig(draftConfig.poiDebug);
-    })
+    }),
   );
   wrap.appendChild(
     createCheckbox("Show Tags", draftConfig.poiDebug.showTags, (checked) => {
       draftConfig.poiDebug.showTags = checked;
       demo.setPoiDebugConfig(draftConfig.poiDebug);
-    })
+    }),
   );
 
-  ([
-    ["Villages", "village"],
-    ["Harbors", "harbor"],
-    ["Hillforts", "hillfort"],
-    ["Mines", "mine"]
-  ] as const).forEach(([label, kind]) => {
+  (
+    [
+      ["Villages", "village"],
+      ["Taverns", "tavern"],
+      ["Mines", "mine"],
+    ] as const
+  ).forEach(([label, kind]) => {
     wrap.appendChild(
       createCheckbox(label, draftConfig.poiDebug.kinds[kind], (checked) => {
         draftConfig.poiDebug.kinds[kind] = checked;
         demo.setPoiDebugConfig(draftConfig.poiDebug);
         renderHud();
-      })
+      }),
+    );
+  });
+
+  wrap.appendChild(createDivider());
+  wrap.appendChild(createSectionLabel("Mine Resources"));
+  (
+    [
+      ["Coal", "coal"],
+      ["Iron", "iron"],
+      ["Copper", "copper"],
+    ] as const
+  ).forEach(([label, kind]) => {
+    wrap.appendChild(
+      createCheckbox(label, draftConfig.poiDebug.mineResources[kind], (checked) => {
+        draftConfig.poiDebug.mineResources[kind] = checked;
+        demo.setPoiDebugConfig(draftConfig.poiDebug);
+        renderHud();
+      }),
     );
   });
 
@@ -1140,7 +1199,7 @@ function createWaterDebugControl(): HTMLElement {
     ["Final", 0],
     ["Terrain Mask", 1],
     ["Water Depth", 2],
-    ["Shore Fade", 3]
+    ["Shore Fade", 3],
   ];
 
   modes.forEach(([label, value]) => {
@@ -1167,6 +1226,9 @@ async function applyDraftToWorld(): Promise<void> {
   demo.setFoliageRadius(draftConfig.foliageRadius);
   demo.setShowFoliage(draftConfig.showFoliage);
   demo.setShowPoi(draftConfig.features.poi);
+  demo.setPoiMarkerMeshesVisible(!draftConfig.hidePoiMarkerMeshes);
+  demo.setPoiLabelsVisible(!draftConfig.hidePoiLabels);
+  demo.setShowPoiFootprints(draftConfig.showPoiFootprints);
   demo.setPoiDebugConfig(draftConfig.poiDebug);
   demo.setShowRoads(draftConfig.features.roads);
   demo.setLodDistances(draftConfig.lodDistances);
@@ -1197,7 +1259,7 @@ function applyDraftMaterialConfig(): void {
     rockScale: draftConfig.materialScales.rockScale,
     snowScale: draftConfig.materialScales.snowScale,
     macroScale: draftConfig.materialScales.macroScale,
-    antiTileStrength: draftConfig.materialScales.antiTileStrength
+    antiTileStrength: draftConfig.materialScales.antiTileStrength,
   };
   config.blendSharpness = draftConfig.blendSharpness;
   config.shorelineStartOffset = draftConfig.shorelineStartOffset;
@@ -1232,6 +1294,9 @@ function buildDraftConfig(): DraftConfig {
     foliageRadius: demo.getFoliageRadius(),
     showFoliage: demo.getShowFoliage(),
     showPoi: demo.getTerrainConfig().features.poi,
+    hidePoiMarkerMeshes: !demo.getPoiMarkerMeshesVisible(),
+    hidePoiLabels: !demo.getPoiLabelsVisible(),
+    showPoiFootprints: demo.getShowPoiFootprints(),
     poiDebug: demo.getPoiDebugConfig(),
     showRoads: demo.getTerrainConfig().features.roads,
     lodDistances: [...demo.getLodDistances()] as [number, number, number],
@@ -1243,15 +1308,13 @@ function buildDraftConfig(): DraftConfig {
     sedimentStrength: demo.getTerrainMaterialConfig().sedimentStrength,
     sedimentSandBias: demo.getTerrainMaterialConfig().sedimentSandBias,
     smallRiverTintStrength: demo.getTerrainMaterialConfig().smallRiverTintStrength,
-    smallRiverTintBrightness:
-      demo.getTerrainMaterialConfig().smallRiverTintBrightness,
-    smallRiverTintSaturation:
-      demo.getTerrainMaterialConfig().smallRiverTintSaturation,
+    smallRiverTintBrightness: demo.getTerrainMaterialConfig().smallRiverTintBrightness,
+    smallRiverTintSaturation: demo.getTerrainMaterialConfig().smallRiverTintSaturation,
     erosion: { ...config.erosion },
     features: { ...config.features },
     poi: { ...config.poi },
     rivers: { ...config.rivers },
-    shape: { ...config.shape }
+    shape: { ...config.shape },
   };
 }
 
@@ -1272,22 +1335,17 @@ function buildTerrainOverridesFromDraft(): TerrainConfigOverrides {
     features: { ...draftConfig.features },
     poi: { ...draftConfig.poi },
     rivers: { ...draftConfig.rivers },
-    shape: { ...draftConfig.shape }
+    shape: { ...draftConfig.shape },
   };
 }
 
-function mergeDraftWithOverrides(
-  base: DraftConfig,
-  overrides: TerrainConfigOverrides
-): DraftConfig {
+function mergeDraftWithOverrides(base: DraftConfig, overrides: TerrainConfigOverrides): DraftConfig {
   return {
     seed: String(overrides.seed ?? base.seed),
     useGeneratedTextures: base.useGeneratedTextures,
     worldMin: overrides.worldMin ?? base.worldMin,
     worldMax: overrides.worldMax ?? base.worldMax,
-    worldSize:
-      (overrides.worldMax ?? base.worldMax) -
-      (overrides.worldMin ?? base.worldMin),
+    worldSize: (overrides.worldMax ?? base.worldMax) - (overrides.worldMin ?? base.worldMin),
     chunksPerAxis: overrides.chunksPerAxis ?? base.chunksPerAxis,
     chunkSize: overrides.chunkSize ?? base.chunkSize,
     baseHeight: overrides.baseHeight ?? base.baseHeight,
@@ -1298,16 +1356,22 @@ function mergeDraftWithOverrides(
     foliageRadius: overrides.foliageRadius ?? base.foliageRadius,
     showFoliage: base.showFoliage,
     showPoi: overrides.features?.poi ?? base.showPoi,
+    hidePoiMarkerMeshes: base.hidePoiMarkerMeshes,
+    hidePoiLabels: base.hidePoiLabels,
+    showPoiFootprints: base.showPoiFootprints,
     poiDebug: {
       showScores: base.poiDebug.showScores,
       showRadii: base.poiDebug.showRadii,
       showTags: base.poiDebug.showTags,
-      kinds: { ...base.poiDebug.kinds }
+      kinds: { ...base.poiDebug.kinds },
+      mineResources: { ...base.poiDebug.mineResources },
     },
     showRoads: overrides.features?.roads ?? base.showRoads,
-    lodDistances: (overrides.lodDistances
-      ? [...overrides.lodDistances]
-      : [...base.lodDistances]) as [number, number, number],
+    lodDistances: (overrides.lodDistances ? [...overrides.lodDistances] : [...base.lodDistances]) as [
+      number,
+      number,
+      number,
+    ],
     materialThresholds: { ...base.materialThresholds },
     materialScales: { ...base.materialScales },
     blendSharpness: base.blendSharpness,
@@ -1320,35 +1384,36 @@ function mergeDraftWithOverrides(
     smallRiverTintSaturation: base.smallRiverTintSaturation,
     erosion: {
       ...base.erosion,
-      ...overrides.erosion
+      ...overrides.erosion,
     },
     features: {
       ...base.features,
-      ...overrides.features
+      ...overrides.features,
     },
     poi: {
       ...base.poi,
-      ...overrides.poi
+      ...overrides.poi,
     },
     rivers: {
       ...base.rivers,
-      ...overrides.rivers
+      ...overrides.rivers,
     },
     shape: {
       ...base.shape,
-      ...overrides.shape
-    }
+      ...overrides.shape,
+    },
   };
 }
 
 function clonePoiDebugConfig(
-  config: MutableTerrainPoiDebugConfig | TerrainPoiDebugConfig
+  config: MutableTerrainPoiDebugConfig | TerrainPoiDebugConfig,
 ): MutableTerrainPoiDebugConfig {
   return {
     showScores: config.showScores,
     showRadii: config.showRadii,
     showTags: config.showTags,
-    kinds: { ...config.kinds }
+    kinds: { ...config.kinds },
+    mineResources: { ...config.mineResources },
   };
 }
 
@@ -1413,10 +1478,7 @@ function createInfoRow(label: string, value: string): HTMLElement {
   return el;
 }
 
-function createButton(
-  label: string,
-  onClick: () => void | Promise<void>
-): HTMLButtonElement {
+function createButton(label: string, onClick: () => void | Promise<void>): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = label;
@@ -1436,11 +1498,7 @@ function createButton(
   return button;
 }
 
-function createTextInput(
-  label: string,
-  initialValue: string,
-  onChange: (value: string) => void
-): HTMLElement {
+function createTextInput(label: string, initialValue: string, onChange: (value: string) => void): HTMLElement {
   const row = document.createElement("label");
   row.style.display = "grid";
   row.style.gap = "4px";
@@ -1470,11 +1528,7 @@ function createTextInput(
   return row;
 }
 
-function createColorInput(
-  label: string,
-  initialValue: string,
-  onChange: (value: string) => void
-): HTMLElement {
+function createColorInput(label: string, initialValue: string, onChange: (value: string) => void): HTMLElement {
   const row = document.createElement("label");
   row.style.display = "grid";
   row.style.gap = "4px";
@@ -1510,7 +1564,7 @@ function createSlider(
   max: number,
   step: number,
   initialValue: number,
-  onInput: (value: number) => void
+  onInput: (value: number) => void,
 ): HTMLElement {
   const row = document.createElement("label");
   row.style.display = "grid";
@@ -1579,6 +1633,9 @@ interface DraftConfig {
   foliageRadius: number;
   showFoliage: boolean;
   showPoi: boolean;
+  hidePoiMarkerMeshes: boolean;
+  hidePoiLabels: boolean;
+  showPoiFootprints: boolean;
   poiDebug: MutableTerrainPoiDebugConfig;
   showRoads: boolean;
   features: MutableTerrainFeatureConfig;
@@ -1628,6 +1685,7 @@ type MutableTerrainPoiDebugConfig = {
   showRadii: boolean;
   showTags: boolean;
   kinds: Record<TerrainPoiKind, boolean>;
+  mineResources: Record<TerrainMineResource, boolean>;
 };
 
 type MutableTerrainRiverConfig = {
@@ -1656,13 +1714,15 @@ function retuneDraftForWorldSize(): void {
   draftConfig.lodDistances = [
     roundToNearest(clamp(160 * sqrtScale, 160, 420), 10),
     roundToNearest(clamp(320 * sqrtScale, 320, 760), 10),
-    roundToNearest(clamp(520 * sqrtScale, 520, 1200), 10)
+    roundToNearest(clamp(520 * sqrtScale, 520, 1200), 10),
   ];
   draftConfig.collisionRadius = roundToNearest(clamp(220 * sqrtScale, 220, 820), 10);
   draftConfig.foliageRadius = roundToNearest(clamp(700 * sqrtScale, 700, 2600), 10);
   draftConfig.erosion.resolution = clampErosionResolution(257 * sqrtScale);
   draftConfig.rivers.resolution = clampErosionResolution(257 * sqrtScale);
   draftConfig.water.inlandMeshResolution = clampErosionResolution(257 * sqrtScale);
+  draftConfig.poi.density = roundToNearest(clamp(0.8 * sqrtScale, 0.8, 3), 0.05);
+  draftConfig.poi.spacing = roundToNearest(clamp(1.1 * Math.pow(scale, 0.18), 1.1, 1.6), 0.05);
 }
 
 function roundToNearest(value: number, step: number): number {

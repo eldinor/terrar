@@ -8,10 +8,12 @@ import {
   ChunkBuildWorkerRequest,
   ChunkBuildWorkerResponse,
   ChunkBuildReadyResponse,
+  SerializedTerrainPoi,
   SerializedTerrainRoad
 } from "../TerrainBuildMessages";
 import { TerrainConfig } from "../TerrainConfig";
 import { TerrainMeshBuilder } from "../TerrainMeshBuilder";
+import { TerrainPoi } from "../TerrainPoiPlanner";
 import { TerrainRoad } from "../TerrainRoadPlanner";
 
 const workerScope = globalThis as typeof globalThis & {
@@ -24,6 +26,7 @@ const workerScope = globalThis as typeof globalThis & {
 
 let cachedBuildVersion = -1;
 let cachedConfig: TerrainConfig | null = null;
+let cachedPoiSites: TerrainPoi[] = [];
 let cachedRoads: TerrainRoad[] = [];
 let cachedGenerator: ProceduralGenerator | null = null;
 
@@ -34,6 +37,7 @@ workerScope.onmessage = (event: MessageEvent<ChunkBuildWorkerRequest>) => {
     if (message.type === "prepareChunkBuild") {
       cachedBuildVersion = message.buildVersion;
       cachedConfig = message.config;
+      cachedPoiSites = deserializePoiSites(message.poiSites);
       cachedRoads = deserializeRoads(message.roads);
       cachedGenerator = new ProceduralGenerator(
         message.config,
@@ -61,7 +65,8 @@ workerScope.onmessage = (event: MessageEvent<ChunkBuildWorkerRequest>) => {
       message.chunkZ,
       cachedConfig,
       cachedGenerator,
-      cachedRoads
+      cachedRoads,
+      cachedPoiSites
     );
     const meshes = message.lods.map((lod) => {
       const meshData = TerrainMeshBuilder.createChunkMeshData(chunkData, lod, cachedConfig!);
@@ -72,6 +77,8 @@ workerScope.onmessage = (event: MessageEvent<ChunkBuildWorkerRequest>) => {
         normals: toTransferBuffer(meshData.normals),
         uvs: toTransferBuffer(meshData.uvs),
         uvs2: toTransferBuffer(meshData.uvs2),
+        uvs3: toTransferBuffer(meshData.uvs3),
+        uvs4: toTransferBuffer(meshData.uvs4),
         colors: toTransferBuffer(meshData.colors)
       };
     });
@@ -81,6 +88,8 @@ workerScope.onmessage = (event: MessageEvent<ChunkBuildWorkerRequest>) => {
       mesh.normals,
       mesh.uvs,
       mesh.uvs2,
+      mesh.uvs3,
+      mesh.uvs4,
       mesh.colors
     ]);
     const response: BuildChunkSuccessResponse = {
@@ -114,6 +123,19 @@ function deserializeRoads(roads: readonly SerializedTerrainRoad[]): TerrainRoad[
     toPoiId: road.toPoiId,
     cost: road.cost,
     points: road.points.map((point) => new Vector3(point.x, point.y, point.z))
+  }));
+}
+
+function deserializePoiSites(poiSites: readonly SerializedTerrainPoi[]): TerrainPoi[] {
+  return poiSites.map((site) => ({
+    id: site.id,
+    kind: site.kind,
+    x: site.x,
+    y: site.y,
+    z: site.z,
+    score: site.score,
+    radius: site.radius,
+    tags: [...site.tags]
   }));
 }
 

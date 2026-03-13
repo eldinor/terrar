@@ -10,6 +10,9 @@ export interface TerrainSample {
   readonly lake: number;
   readonly lakeSurfaceHeight: number;
   readonly sediment: number;
+  readonly coal: number;
+  readonly iron: number;
+  readonly copper: number;
 }
 
 export interface ProceduralGeneratorSnapshot {
@@ -21,6 +24,9 @@ export interface ProceduralGeneratorSnapshot {
   readonly lakeField: Float32Array | null;
   readonly lakeSurfaceField: Float32Array | null;
   readonly sedimentField: Float32Array | null;
+  readonly coalField: Float32Array | null;
+  readonly ironField: Float32Array | null;
+  readonly copperField: Float32Array | null;
 }
 
 interface FbmOptions {
@@ -39,6 +45,9 @@ export class ProceduralGenerator {
   private readonly lakeField: Float32Array | null;
   private readonly lakeSurfaceField: Float32Array | null;
   private readonly sedimentField: Float32Array | null;
+  private readonly coalField: Float32Array | null;
+  private readonly ironField: Float32Array | null;
+  private readonly copperField: Float32Array | null;
   private readonly analysisResolution: number;
   private readonly analysisStep: number;
 
@@ -62,10 +71,14 @@ export class ProceduralGenerator {
       this.lakeField = cloneField(snapshot.lakeField);
       this.lakeSurfaceField = cloneField(snapshot.lakeSurfaceField);
       this.sedimentField = cloneField(snapshot.sedimentField);
+      this.coalField = cloneField(snapshot.coalField);
+      this.ironField = cloneField(snapshot.ironField);
+      this.copperField = cloneField(snapshot.copperField);
       return;
     }
 
-    const usesCachedHeightfield = config.erosion.enabled || config.rivers.enabled;
+    const usesCachedHeightfield =
+      config.erosion.enabled || config.rivers.enabled || config.features.poi;
     if (!usesCachedHeightfield) {
       this.terrainHeightField = null;
       this.flowField = null;
@@ -73,6 +86,9 @@ export class ProceduralGenerator {
       this.lakeField = null;
       this.lakeSurfaceField = null;
       this.sedimentField = null;
+      this.coalField = null;
+      this.ironField = null;
+      this.copperField = null;
       return;
     }
 
@@ -133,6 +149,10 @@ export class ProceduralGenerator {
       this.sedimentField = null;
     }
 
+    const resources = this.buildResourceFields(heights);
+    this.coalField = resources.coal;
+    this.ironField = resources.iron;
+    this.copperField = resources.copper;
     this.terrainHeightField = heights;
   }
 
@@ -145,7 +165,10 @@ export class ProceduralGenerator {
       riverField: cloneField(this.riverField),
       lakeField: cloneField(this.lakeField),
       lakeSurfaceField: cloneField(this.lakeSurfaceField),
-      sedimentField: cloneField(this.sedimentField)
+      sedimentField: cloneField(this.sedimentField),
+      coalField: cloneField(this.coalField),
+      ironField: cloneField(this.ironField),
+      copperField: cloneField(this.copperField)
     };
   }
 
@@ -158,7 +181,22 @@ export class ProceduralGenerator {
     const lake = this.sampleLake(x, z);
     const lakeSurfaceHeight = this.sampleLakeSurfaceHeight(x, z, height);
     const sediment = this.sampleSediment(x, z);
-    return { height, moisture, temperature, flow, river, lake, lakeSurfaceHeight, sediment };
+    const coal = this.sampleCoal(x, z, height, moisture);
+    const iron = this.sampleIron(x, z, height);
+    const copper = this.sampleCopper(x, z, height);
+    return {
+      height,
+      moisture,
+      temperature,
+      flow,
+      river,
+      lake,
+      lakeSurfaceHeight,
+      sediment,
+      coal,
+      iron,
+      copper
+    };
   }
 
   sampleBaseTerrainHeight(x: number, z: number): number {
@@ -184,6 +222,38 @@ export class ProceduralGenerator {
 
     const sediment = this.sampleField(this.sedimentField, x, z);
     return Number.isFinite(sediment) ? sediment : 0;
+  }
+
+  sampleCoal(x: number, z: number, fallbackHeight?: number, fallbackMoisture?: number): number {
+    if (this.coalField) {
+      const coal = this.sampleField(this.coalField, x, z);
+      return Number.isFinite(coal) ? coal : 0;
+    }
+
+    return this.sampleProceduralCoal(
+      x,
+      z,
+      fallbackHeight ?? this.sampleBaseHeight(x, z),
+      fallbackMoisture ?? this.sampleClimate(x, z).moisture
+    );
+  }
+
+  sampleIron(x: number, z: number, fallbackHeight?: number): number {
+    if (this.ironField) {
+      const iron = this.sampleField(this.ironField, x, z);
+      return Number.isFinite(iron) ? iron : 0;
+    }
+
+    return this.sampleProceduralIron(x, z, fallbackHeight ?? this.sampleBaseHeight(x, z));
+  }
+
+  sampleCopper(x: number, z: number, fallbackHeight?: number): number {
+    if (this.copperField) {
+      const copper = this.sampleField(this.copperField, x, z);
+      return Number.isFinite(copper) ? copper : 0;
+    }
+
+    return this.sampleProceduralCopper(x, z, fallbackHeight ?? this.sampleBaseHeight(x, z));
   }
 
   private sampleBaseHeight(x: number, z: number): number {
@@ -351,6 +421,32 @@ export class ProceduralGenerator {
     return heights;
   }
 
+  private buildResourceFields(heights: Float32Array): {
+    coal: Float32Array;
+    iron: Float32Array;
+    copper: Float32Array;
+  } {
+    const coal = new Float32Array(heights.length);
+    const iron = new Float32Array(heights.length);
+    const copper = new Float32Array(heights.length);
+    const worldMin = this.config.worldMin;
+
+    for (let z = 0; z < this.analysisResolution; z += 1) {
+      for (let x = 0; x < this.analysisResolution; x += 1) {
+        const index = this.toIndex(x, z, this.analysisResolution);
+        const worldX = worldMin + x * this.analysisStep;
+        const worldZ = worldMin + z * this.analysisStep;
+        const height = heights[index];
+        const climate = this.sampleClimate(worldX, worldZ);
+        coal[index] = this.sampleProceduralCoal(worldX, worldZ, height, climate.moisture);
+        iron[index] = this.sampleProceduralIron(worldX, worldZ, height);
+        copper[index] = this.sampleProceduralCopper(worldX, worldZ, height);
+      }
+    }
+
+    return { coal, iron, copper };
+  }
+
   private toIndex(x: number, z: number, resolution: number): number {
     return z * resolution + x;
   }
@@ -381,6 +477,79 @@ export class ProceduralGenerator {
     const hx0 = Scalar.Lerp(h00, h10, tx);
     const hx1 = Scalar.Lerp(h01, h11, tx);
     return Scalar.Lerp(hx0, hx1, tz);
+  }
+
+  private sampleProceduralCoal(
+    x: number,
+    z: number,
+    height: number,
+    moisture: number
+  ): number {
+    const basinNoise = this.fbm(x - 311.4, z + 904.7, {
+      frequency: 0.0018,
+      octaves: 4,
+      lacunarity: 2,
+      gain: 0.52
+    });
+    const seamNoise = this.fbm(x + 147.8, z - 512.9, {
+      frequency: 0.0044,
+      octaves: 3,
+      lacunarity: 2.1,
+      gain: 0.5
+    });
+    const foothillBand =
+      smoothStep(this.config.waterLevel + 18, 96, height) *
+      (1 - smoothStep(188, 260, height));
+    const sedimentaryBias = 1 - Math.abs(moisture - 0.52) * 1.35;
+    return Scalar.Clamp(
+      basinNoise * 0.5 + seamNoise * 0.22 + foothillBand * 0.22 + sedimentaryBias * 0.14,
+      0,
+      1
+    );
+  }
+
+  private sampleProceduralIron(x: number, z: number, height: number): number {
+    const mountainNearness = smoothStep(62, 178, height);
+    const beltNoise = this.ridgedFbm(x + 701.2, z - 233.6, {
+      frequency: 0.0022,
+      octaves: 4,
+      lacunarity: 2.05,
+      gain: 0.52
+    });
+    const hostRockNoise = this.fbm(x - 828.4, z + 515.3, {
+      frequency: 0.0041,
+      octaves: 3,
+      lacunarity: 2.1,
+      gain: 0.48
+    });
+    return Scalar.Clamp(
+      mountainNearness * 0.44 + beltNoise * 0.38 + hostRockNoise * 0.22,
+      0,
+      1
+    );
+  }
+
+  private sampleProceduralCopper(x: number, z: number, height: number): number {
+    const uplandBand =
+      smoothStep(this.config.waterLevel + 26, 118, height) *
+      (1 - smoothStep(228, 300, height));
+    const patchNoise = this.fbm(x + 1222.5, z + 804.9, {
+      frequency: 0.0031,
+      octaves: 4,
+      lacunarity: 2.15,
+      gain: 0.5
+    });
+    const fractureNoise = this.ridgedFbm(x - 411.7, z - 1017.2, {
+      frequency: 0.0062,
+      octaves: 3,
+      lacunarity: 2,
+      gain: 0.52
+    });
+    return Scalar.Clamp(
+      uplandBand * 0.26 + patchNoise * 0.42 + fractureNoise * 0.34,
+      0,
+      1
+    );
   }
 
   private fbm(x: number, z: number, options: FbmOptions): number {

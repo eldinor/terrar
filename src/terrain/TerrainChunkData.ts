@@ -2,6 +2,7 @@ import { ProceduralGenerator } from "./ProceduralGenerator";
 import { classifyTerrainBiome, TerrainBiome } from "./TerrainBiome";
 import { TerrainConfig, TerrainLODLevel } from "./TerrainConfig";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { TerrainPoi, TerrainPoiKind } from "./TerrainPoiPlanner";
 import { TerrainRoad } from "./TerrainRoadPlanner";
 
 export interface TerrainSampleGrid {
@@ -14,6 +15,9 @@ export interface TerrainSampleGrid {
   readonly river: Float32Array;
   readonly lake: Float32Array;
   readonly sediment: Float32Array;
+  readonly coal: Float32Array;
+  readonly iron: Float32Array;
+  readonly copper: Float32Array;
   readonly moisture: Float32Array;
   readonly temperature: Float32Array;
   readonly slopes: Float32Array;
@@ -37,7 +41,8 @@ export class TerrainChunkData {
     readonly chunkZ: number,
     private readonly config: TerrainConfig,
     private readonly generator: ProceduralGenerator,
-    private readonly roads: readonly TerrainRoad[] = []
+    private readonly roads: readonly TerrainRoad[] = [],
+    private readonly poiSites: readonly TerrainPoi[] = []
   ) {
     this.minX = config.worldMin + chunkX * config.chunkSize;
     this.maxX = this.minX + config.chunkSize;
@@ -87,6 +92,9 @@ export class TerrainChunkData {
     const river = new Float32Array(vertexCount);
     const lake = new Float32Array(vertexCount);
     const sediment = new Float32Array(vertexCount);
+    const coal = new Float32Array(vertexCount);
+    const iron = new Float32Array(vertexCount);
+    const copper = new Float32Array(vertexCount);
     const moisture = new Float32Array(vertexCount);
     const temperature = new Float32Array(vertexCount);
     const slopes = new Float32Array(vertexCount);
@@ -101,13 +109,20 @@ export class TerrainChunkData {
         const sample = this.generator.sample(sampleX, sampleZ);
         const rawHeight = this.generator.sampleBaseTerrainHeight(sampleX, sampleZ);
         const index = this.toIndex(x, z, resolution);
-        heights[index] = this.applyRoadShaping(sample.height, sampleX, sampleZ);
+        heights[index] = this.applyPoiShaping(
+          this.applyRoadShaping(sample.height, sampleX, sampleZ),
+          sampleX,
+          sampleZ
+        );
         rawHeights[index] = rawHeight;
         erosionDeltas[index] = rawHeight - sample.height;
         flow[index] = sample.flow;
         river[index] = sample.river;
         lake[index] = sample.lake;
         sediment[index] = sample.sediment;
+        coal[index] = sample.coal;
+        iron[index] = sample.iron;
+        copper[index] = sample.copper;
         moisture[index] = sample.moisture;
         temperature[index] = sample.temperature;
         waterDepth[index] = Math.max(0, this.config.waterLevel - sample.height);
@@ -137,7 +152,10 @@ export class TerrainChunkData {
             river: river[index],
             lake: lake[index],
             sediment: sediment[index],
-            lakeSurfaceHeight: heights[index]
+            lakeSurfaceHeight: heights[index],
+            coal: 0,
+            iron: 0,
+            copper: 0
           },
           normalizedSlope,
           this.config
@@ -161,6 +179,9 @@ export class TerrainChunkData {
       river,
       lake,
       sediment,
+      coal,
+      iron,
+      copper,
       moisture,
       temperature,
       slopes,
@@ -175,7 +196,8 @@ export class TerrainChunkData {
   }
 
   private sampleShapedHeight(x: number, z: number): number {
-    return this.applyRoadShaping(this.generator.sample(x, z).height, x, z);
+    const roadShaped = this.applyRoadShaping(this.generator.sample(x, z).height, x, z);
+    return this.applyPoiShaping(roadShaped, x, z);
   }
 
   private applyRoadShaping(baseHeight: number, x: number, z: number): number {
@@ -214,6 +236,56 @@ export class TerrainChunkData {
     const targetHeight = bestRoadHeight - 0.12;
     const flattened = lerp(baseHeight, targetHeight, center * 0.82);
     return lerp(flattened, targetHeight, shoulder * 0.22);
+  }
+
+  private applyPoiShaping(baseHeight: number, x: number, z: number): number {
+    if (this.poiSites.length === 0) {
+      return baseHeight;
+    }
+
+    let bestInfluence = 0;
+    let bestTargetHeight = baseHeight;
+
+    this.poiSites.forEach((site) => {
+      const footprint = getPoiFootprintParams(site.kind);
+      const dx = x - site.x;
+      const dz = z - site.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      if (distance > footprint.outerRadius) {
+        return;
+      }
+
+      const inner = 1 - smoothStep(0, footprint.innerRadius, distance);
+      const outer =
+        1 -
+        smoothStep(
+          footprint.innerRadius,
+          footprint.outerRadius,
+          distance
+        );
+      const influence = Math.max(inner * 0.82, outer * 0.34);
+      if (influence <= bestInfluence) {
+        return;
+      }
+
+      bestInfluence = influence;
+      bestTargetHeight = site.y - footprint.cutDepth;
+    });
+
+    if (bestInfluence <= 0) {
+      return baseHeight;
+    }
+
+    return lerp(baseHeight, bestTargetHeight, bestInfluence);
+  }
+
+  isInsidePoiFootprint(x: number, z: number): boolean {
+    return this.poiSites.some((site) => {
+      const footprint = getPoiFootprintParams(site.kind);
+      const dx = x - site.x;
+      const dz = z - site.z;
+      return dx * dx + dz * dz <= footprint.outerRadius * footprint.outerRadius;
+    });
   }
 
   private computeShoreProximity(
@@ -257,6 +329,22 @@ export class TerrainChunkData {
 
 const ROAD_SHAPE_INNER_RADIUS = 5.5;
 const ROAD_SHAPE_OUTER_RADIUS = 11.5;
+type PoiFootprintParams = {
+  readonly innerRadius: number;
+  readonly outerRadius: number;
+  readonly cutDepth: number;
+};
+
+function getPoiFootprintParams(kind: TerrainPoiKind): PoiFootprintParams {
+  switch (kind) {
+    case TerrainPoiKind.Village:
+      return { innerRadius: 12, outerRadius: 20, cutDepth: 0.28 };
+    case TerrainPoiKind.Tavern:
+      return { innerRadius: 10, outerRadius: 17, cutDepth: 0.34 };
+    case TerrainPoiKind.Mine:
+      return { innerRadius: 11, outerRadius: 18, cutDepth: 0.42 };
+  }
+}
 
 function closestPointOnSegmentXZ(
   x: number,

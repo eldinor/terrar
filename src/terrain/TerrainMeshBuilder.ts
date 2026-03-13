@@ -83,6 +83,8 @@ export class TerrainMeshBuilder {
     vertexData.normals = Array.from(meshData.normals);
     vertexData.uvs = Array.from(meshData.uvs);
     vertexData.uvs2 = Array.from(meshData.uvs2);
+    vertexData.uvs3 = Array.from(meshData.uvs3);
+    vertexData.uvs4 = Array.from(meshData.uvs4);
     vertexData.colors = Array.from(meshData.colors);
     vertexData.applyToMesh(mesh, true);
     mesh.material = material;
@@ -101,6 +103,8 @@ export class TerrainMeshBuilder {
     const indices: number[] = [];
     const uvs: number[] = [];
     const uvs2: number[] = [];
+    const uvs3: number[] = [];
+    const uvs4: number[] = [];
     const colors: number[] = [];
     const normals: number[] = [];
 
@@ -114,6 +118,10 @@ export class TerrainMeshBuilder {
       river,
       lake,
       sediment
+      ,
+      coal,
+      iron,
+      copper
     } = grid;
 
     for (let z = 0; z < resolution; z += 1) {
@@ -130,6 +138,14 @@ export class TerrainMeshBuilder {
         uvs2.push(
           Math.max(0, Math.min(1, river[index])),
           Math.max(0, Math.min(1, lake[index]))
+        );
+        uvs3.push(
+          Math.max(0, Math.min(1, coal[index])),
+          Math.max(0, Math.min(1, iron[index]))
+        );
+        uvs4.push(
+          Math.max(0, Math.min(1, copper[index])),
+          0
         );
         normals.push(normal.x, normal.y, normal.z);
         const color = pickVertexColor(
@@ -157,6 +173,8 @@ export class TerrainMeshBuilder {
       positions,
       uvs,
       uvs2,
+      uvs3,
+      uvs4,
       normals,
       colors,
       indices,
@@ -169,6 +187,8 @@ export class TerrainMeshBuilder {
       positions,
       uvs,
       uvs2,
+      uvs3,
+      uvs4,
       normals,
       colors,
       indices,
@@ -181,6 +201,8 @@ export class TerrainMeshBuilder {
       positions,
       uvs,
       uvs2,
+      uvs3,
+      uvs4,
       normals,
       colors,
       indices,
@@ -193,6 +215,8 @@ export class TerrainMeshBuilder {
       positions,
       uvs,
       uvs2,
+      uvs3,
+      uvs4,
       normals,
       colors,
       indices,
@@ -208,6 +232,8 @@ export class TerrainMeshBuilder {
       normals: new Float32Array(normals),
       uvs: new Float32Array(uvs),
       uvs2: new Float32Array(uvs2),
+      uvs3: new Float32Array(uvs3),
+      uvs4: new Float32Array(uvs4),
       colors: new Float32Array(colors)
     };
   }
@@ -219,6 +245,8 @@ export interface TerrainChunkMeshData {
   readonly normals: Float32Array;
   readonly uvs: Float32Array;
   readonly uvs2: Float32Array;
+  readonly uvs3: Float32Array;
+  readonly uvs4: Float32Array;
   readonly colors: Float32Array;
 }
 
@@ -228,6 +256,8 @@ function appendSkirt(
   positions: number[],
   uvs: number[],
   uvs2: number[],
+  uvs3: number[],
+  uvs4: number[],
   normals: number[],
   colors: number[],
   indices: number[],
@@ -243,9 +273,12 @@ function appendSkirt(
     rawHeights,
     erosionDeltas,
     flow,
-    river,
-    lake,
-    sediment
+      river,
+      lake,
+      sediment,
+      coal,
+      iron,
+      copper
   } = grid;
   const topIndices: number[] = [];
   const skirtIndices: number[] = [];
@@ -267,6 +300,14 @@ function appendSkirt(
     uvs2.push(
       Math.max(0, Math.min(1, river[gridIndex])),
       Math.max(0, Math.min(1, lake[gridIndex]))
+    );
+    uvs3.push(
+      Math.max(0, Math.min(1, coal[gridIndex])),
+      Math.max(0, Math.min(1, iron[gridIndex]))
+    );
+    uvs4.push(
+      Math.max(0, Math.min(1, copper[gridIndex])),
+      0
     );
     const topNormal = Vector3.FromArray(normals, gridIndex * 3);
     const skirtNormal = createSkirtNormal(topNormal, edge);

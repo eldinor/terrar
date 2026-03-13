@@ -4,10 +4,11 @@ import { TerrainConfig } from "./TerrainConfig";
 
 export enum TerrainPoiKind {
   Village = "village",
-  Hillfort = "hillfort",
-  Harbor = "harbor",
+  Tavern = "tavern",
   Mine = "mine"
 }
+
+export type TerrainMineResource = "coal" | "iron" | "copper";
 
 export interface TerrainPoi {
   readonly id: string;
@@ -42,6 +43,13 @@ interface TerrainPoiContext {
   readonly floodplainCore: number;
   readonly crossingCandidate: number;
   readonly passCandidate: number;
+  readonly mountainFlank: number;
+  readonly summitExposure: number;
+  readonly lakeShore: number;
+  readonly crossroadsCandidate: number;
+  readonly coal: number;
+  readonly iron: number;
+  readonly copper: number;
 }
 
 interface TerrainPoiArchetype {
@@ -53,9 +61,8 @@ interface TerrainPoiArchetype {
 
 const POI_ARCHETYPES: readonly TerrainPoiArchetype[] = [
   { kind: TerrainPoiKind.Village, maxCount: 4, radius: 156, minScore: 0.58 },
-  { kind: TerrainPoiKind.Harbor, maxCount: 2, radius: 184, minScore: 0.62 },
-  { kind: TerrainPoiKind.Hillfort, maxCount: 3, radius: 186, minScore: 0.59 },
-  { kind: TerrainPoiKind.Mine, maxCount: 3, radius: 164, minScore: 0.56 }
+  { kind: TerrainPoiKind.Tavern, maxCount: 2, radius: 168, minScore: 0.46 },
+  { kind: TerrainPoiKind.Mine, maxCount: 4, radius: 148, minScore: 0.48 }
 ] as const;
 
 export class TerrainPoiPlanner {
@@ -91,14 +98,14 @@ export class TerrainPoiPlanner {
           this.scoreVillage(context)
         );
         this.pushCandidate(
-          candidates.get(TerrainPoiKind.Harbor)!,
+          candidates.get(TerrainPoiKind.Village)!,
           context,
-          this.scoreHarbor(context)
+          this.scoreWaterVillage(context)
         );
         this.pushCandidate(
-          candidates.get(TerrainPoiKind.Hillfort)!,
+          candidates.get(TerrainPoiKind.Tavern)!,
           context,
-          this.scoreHillfort(context)
+          this.scoreTavern(context)
         );
         this.pushCandidate(
           candidates.get(TerrainPoiKind.Mine)!,
@@ -117,6 +124,10 @@ export class TerrainPoiPlanner {
         Math.round(archetype.maxCount * this.config.poi.density)
       );
       const spacingRadius = archetype.radius * this.config.poi.spacing;
+      if (archetype.kind === TerrainPoiKind.Mine) {
+        this.selectMineCandidates(selected, list, archetype.minScore, maxCount, spacingRadius);
+        return;
+      }
 
       for (const candidate of list) {
         if (candidate.score < archetype.minScore) {
@@ -192,46 +203,54 @@ export class TerrainPoiPlanner {
     };
   }
 
-  private scoreHarbor(context: TerrainPoiContext) {
-    const shore = Math.max(context.coastProximity, context.lake * 0.78);
+  private scoreWaterVillage(context: TerrainPoiContext) {
+    const shore = Math.max(context.coastProximity, context.lakeShore);
     const lowSlope = context.localFlatness;
-    const lowland = context.lowland;
-    const waterAccess = Math.max(context.waterNearby, context.lake);
+    const fertile = context.sediment * 0.45 + context.moisture * 0.55;
+    const safeFloodplain = 1 - context.floodplainCore;
     const value =
-      shore * 0.42 +
-      lowSlope * 0.2 +
-      lowland * 0.16 +
-      waterAccess * 0.12 +
-      context.crossingCandidate * 0.1;
+      shore * 0.16 +
+      lowSlope * 0.12 +
+      fertile * 0.1 +
+      context.lowland * 0.06 +
+      safeFloodplain * 0.04;
     return {
-      kind: TerrainPoiKind.Harbor,
+      kind: TerrainPoiKind.Village,
       value,
-      radius: 146,
+      radius: 128,
       tags: buildContextTags(context, [
-        ["shore", shore],
-        ["water", waterAccess],
-        ["lowland", lowland],
-        ["ford", context.crossingCandidate]
+        ["water", Math.max(context.waterNearby, shore)],
+        ["coast", context.coastProximity],
+        ["lake", context.lakeShore],
+        ["fertile", fertile]
       ])
     };
   }
 
-  private scoreHillfort(context: TerrainPoiContext) {
-    const commandingSlope = smoothStep(0.06, 0.22, context.slope);
+  private scoreTavern(context: TerrainPoiContext) {
+    const buildable = context.localFlatness;
+    const moderateHeight =
+      smoothStep(this.config.waterLevel + 18, 72, context.height) *
+      (1 - smoothStep(180, 300, context.height));
+    const travelerWater = Math.max(context.waterNearby * 0.6, context.lakeShore * 0.35);
+    const safeFloodplain = 1 - context.floodplainCore;
     const value =
-      context.prominence * 0.28 +
-      context.highland * 0.2 +
-      commandingSlope * 0.18 +
-      (1 - context.waterNearby) * 0.12 +
-      context.passCandidate * 0.22;
+      context.crossroadsCandidate * 0.38 +
+      context.passCandidate * 0.18 +
+      context.crossingCandidate * 0.16 +
+      buildable * 0.14 +
+      moderateHeight * 0.08 +
+      travelerWater * 0.06 +
+      safeFloodplain * 0.08;
     return {
-      kind: TerrainPoiKind.Hillfort,
+      kind: TerrainPoiKind.Tavern,
       value,
-      radius: 154,
+      radius: 118,
       tags: buildContextTags(context, [
-        ["prominent", context.prominence],
-        ["high", context.highland],
-        ["defensive", commandingSlope],
+        ["crossroads", context.crossroadsCandidate],
+        ["pass", context.passCandidate],
+        ["ford", context.crossingCandidate],
+        ["flat", buildable],
         ["pass", context.passCandidate]
       ])
     };
@@ -239,18 +258,39 @@ export class TerrainPoiPlanner {
 
   private scoreMine(context: TerrainPoiContext) {
     const rocky =
-      smoothStep(0.12, 0.3, context.slope) * 0.55 +
-      context.highland * 0.45;
-    const dry = 1 - (context.waterNearby * 0.55 + context.sediment * 0.2);
-    const value = rocky * 0.48 + context.prominence * 0.24 + dry * 0.16 + context.highland * 0.12;
+      smoothStep(0.06, 0.2, context.slope) * 0.58 +
+      context.highland * 0.42;
+    const dry = 1 - (context.waterNearby * 0.42 + context.sediment * 0.12);
+    const moderateSlope =
+      smoothStep(0.05, 0.12, context.slope) *
+      (1 - smoothStep(0.2, 0.3, context.slope));
+    const steepPenalty = 1 - smoothStep(0.22, 0.34, context.slope);
+    const accessibleBench =
+      context.localFlatness * 0.38 +
+      context.passCandidate * 0.22 +
+      context.crossroadsCandidate * 0.08 +
+      (1 - context.floodplainCore) * 0.22 +
+      moderateSlope * 0.1;
+    const resource = selectMineResource(context);
+    const value =
+      (resource.score * 0.34 +
+        rocky * 0.22 +
+        context.mountainFlank * 0.38 +
+        dry * 0.1 +
+        accessibleBench * 0.18) *
+      steepPenalty *
+      (1 - context.summitExposure * 0.68);
     return {
       kind: TerrainPoiKind.Mine,
       value,
-      radius: 128,
+      radius: 120,
       tags: buildContextTags(context, [
+        [resource.kind, resource.score],
         ["rock", rocky],
         ["dry", dry],
-        ["high", context.highland],
+        ["foothill", context.mountainFlank],
+        ["bench", accessibleBench],
+        ["summit", context.summitExposure],
         ["pass", context.passCandidate]
       ])
     };
@@ -316,6 +356,36 @@ export class TerrainPoiPlanner {
     const highland = smoothStep(76, 180, center.height);
     const crossingCandidate = this.computeCrossingCandidate(x, z, center, slope);
     const passCandidate = this.computePassCandidate(x, z, center.height, slope);
+    const crossroadsCandidate = this.computeCrossroadsCandidate(
+      x,
+      z,
+      center.height,
+      slope,
+      crossingCandidate,
+      passCandidate
+    );
+    const mountainFlank = Scalar.Clamp(
+      highland *
+        smoothStep(0.08, 0.24, slope) *
+        (1 - smoothStep(0.34, 0.74, prominence)),
+      0,
+      1
+    );
+    const summitExposure = Scalar.Clamp(
+      highland *
+        smoothStep(0.26, 0.72, prominence) *
+        smoothStep(0.08, 0.24, slope),
+      0,
+      1
+    );
+    const lakeShore = Scalar.Clamp(
+      Math.max(center.lake, waterNearby * 0.55) * (1 - coastProximity),
+      0,
+      1
+    );
+    const coal = center.coal;
+    const iron = center.iron;
+    const copper = center.copper;
 
     return {
       x,
@@ -336,12 +406,61 @@ export class TerrainPoiPlanner {
       highland,
       floodplainCore,
       crossingCandidate,
-      passCandidate
+      passCandidate,
+      mountainFlank,
+      summitExposure,
+      lakeShore,
+      crossroadsCandidate,
+      coal,
+      iron,
+      copper
     };
   }
 
   private computeCoastProximity(height: number): number {
     return 1 - smoothStep(6, 28, Math.abs(height - this.config.waterLevel));
+  }
+
+  private selectMineCandidates(
+    selected: TerrainPoiCandidate[],
+    list: readonly TerrainPoiCandidate[],
+    minScore: number,
+    maxCount: number,
+    spacingRadius: number
+  ): void {
+    const remaining = [...list];
+
+    while (
+      selected.filter((site) => site.kind === TerrainPoiKind.Mine).length < maxCount &&
+      remaining.length > 0
+    ) {
+      let bestIndex = -1;
+      let bestAdjustedScore = minScore;
+
+      for (let index = 0; index < remaining.length; index += 1) {
+        const candidate = remaining[index];
+        if (candidate.score < minScore) {
+          break;
+        }
+        if (!this.canPlaceCandidate(selected, candidate, spacingRadius)) {
+          continue;
+        }
+
+        const adjustedScore =
+          candidate.score + computeMineDiversityBonus(selected, candidate);
+        if (adjustedScore > bestAdjustedScore) {
+          bestAdjustedScore = adjustedScore;
+          bestIndex = index;
+        }
+      }
+
+      if (bestIndex < 0) {
+        break;
+      }
+
+      selected.push(remaining[bestIndex]);
+      remaining.splice(bestIndex, 1);
+    }
   }
 
   private canPlaceCandidate(
@@ -396,6 +515,46 @@ export class TerrainPoiPlanner {
     );
   }
 
+  private computeCrossroadsCandidate(
+    x: number,
+    z: number,
+    height: number,
+    slope: number,
+    crossingCandidate: number,
+    passCandidate: number
+  ): number {
+    const span = 36;
+    const directions: readonly [number, number][] = [
+      [span, 0],
+      [-span, 0],
+      [0, span],
+      [0, -span]
+    ];
+    let accessibleDirections = 0;
+    directions.forEach(([dx, dz]) => {
+      const sample = this.generator.sample(x + dx, z + dz);
+      const grade = Math.abs(sample.height - height) / span;
+      if (grade < 0.22) {
+        accessibleDirections += 1;
+      }
+    });
+
+    const openness = smoothStep(2, 4, accessibleDirections);
+    const buildable = 1 - smoothStep(0.08, 0.24, slope);
+    const moderateHeight =
+      smoothStep(this.config.waterLevel + 18, 70, height) *
+      (1 - smoothStep(180, 300, height));
+    return Scalar.Clamp(
+      openness * 0.46 +
+        crossingCandidate * 0.22 +
+        passCandidate * 0.16 +
+        buildable * 0.1 +
+        moderateHeight * 0.06,
+      0,
+      1
+    );
+  }
+
   private estimateLocalRiverWidth(x: number, z: number): number {
     const span = 24;
     let support = 0;
@@ -443,9 +602,71 @@ function buildContextTags(
   if (context.passCandidate > 0.68 && !tags.includes("pass")) {
     tags.push("pass");
   }
+  if (context.crossroadsCandidate > 0.62 && !tags.includes("crossroads")) {
+    tags.push("crossroads");
+  }
   return tags;
 }
 
 function localSlopeToFlatness(slope: number): number {
   return 1 - smoothStep(0.05, 0.24, slope);
+}
+
+function selectMineResource(
+  context: TerrainPoiContext
+): { kind: TerrainMineResource; score: number } {
+  const iron =
+    context.iron * (0.82 + context.highland * 0.2 + context.mountainFlank * 0.26);
+  const copper =
+    context.copper * (0.8 + smoothStep(0.08, 0.18, context.slope) * 0.2 + context.highland * 0.18);
+  const coal =
+    context.coal *
+    (0.46 + (1 - context.highland) * 0.08 + context.localFlatness * 0.04);
+
+  if (iron >= copper && iron >= coal) {
+    return { kind: "iron", score: iron };
+  }
+  if (copper >= coal) {
+    return { kind: "copper", score: copper };
+  }
+  return { kind: "coal", score: coal };
+}
+
+export function getMineResourceKind(
+  site: Pick<TerrainPoi, "kind" | "tags">
+): TerrainMineResource | null {
+  if (site.kind !== TerrainPoiKind.Mine) {
+    return null;
+  }
+
+  if (site.tags.includes("iron")) {
+    return "iron";
+  }
+  if (site.tags.includes("copper")) {
+    return "copper";
+  }
+  if (site.tags.includes("coal")) {
+    return "coal";
+  }
+
+  return null;
+}
+
+function computeMineDiversityBonus(
+  selected: readonly TerrainPoiCandidate[],
+  candidate: TerrainPoiCandidate
+): number {
+  const resource = getMineResourceKind(candidate);
+  if (!resource) {
+    return 0;
+  }
+
+  let matchingCount = 0;
+  selected.forEach((site) => {
+    if (site.kind === TerrainPoiKind.Mine && getMineResourceKind(site) === resource) {
+      matchingCount += 1;
+    }
+  });
+
+  return matchingCount === 0 ? 0.18 : -matchingCount * 0.12;
 }

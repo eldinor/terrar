@@ -14,5 +14,9 @@ export enum TerrainDebugViewMode {
   Lake = 12,
   Sediment = 13,
   RiverWidth = 14,
-  WaterTransition = 15
+  WaterTransition = 15,
+  Resource = 16,
+  Coal = 17,
+  Iron = 18,
+  Copper = 19
 }

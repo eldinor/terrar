@@ -6,7 +6,10 @@ type SnapshotFieldName =
   | "riverField"
   | "lakeField"
   | "lakeSurfaceField"
-  | "sedimentField";
+  | "sedimentField"
+  | "coalField"
+  | "ironField"
+  | "copperField";
 
 const SNAPSHOT_FIELD_NAMES: readonly SnapshotFieldName[] = [
   "terrainHeightField",
@@ -14,7 +17,10 @@ const SNAPSHOT_FIELD_NAMES: readonly SnapshotFieldName[] = [
   "riverField",
   "lakeField",
   "lakeSurfaceField",
-  "sedimentField"
+  "sedimentField",
+  "coalField",
+  "ironField",
+  "copperField"
 ] as const;
 
 export interface PackedTerrainSnapshotField {
@@ -85,7 +91,10 @@ export function unpackTerrainSnapshot(
     riverField: unpackField(packed, "riverField"),
     lakeField: unpackField(packed, "lakeField"),
     lakeSurfaceField: unpackField(packed, "lakeSurfaceField"),
-    sedimentField: unpackField(packed, "sedimentField")
+    sedimentField: unpackField(packed, "sedimentField"),
+    coalField: unpackField(packed, "coalField"),
+    ironField: unpackField(packed, "ironField"),
+    copperField: unpackField(packed, "copperField")
   };
 }
 

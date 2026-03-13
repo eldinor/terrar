@@ -25,9 +25,11 @@ import { TerrainPoi, TerrainPoiPlanner } from "./TerrainPoiPlanner";
 import {
   DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
   TerrainPoiDebugConfig,
+  TerrainPoiMeshStats,
   TerrainPoiStats,
   TerrainPoiSystem
 } from "./TerrainPoiSystem";
+import { TerrainPoiFootprintSystem } from "./TerrainPoiFootprintSystem";
 import { TerrainRoad, TerrainRoadPlanner } from "./TerrainRoadPlanner";
 import { TerrainRoadStats, TerrainRoadSystem } from "./TerrainRoadSystem";
 import { TerrainWaterConfig, TerrainWaterSystem } from "./TerrainWaterSystem";
@@ -50,6 +52,7 @@ export class TerrainSystem {
   private foliageSystem: TerrainFoliageSystem;
   private poiPlanner: TerrainPoiPlanner | null;
   private poiSystem: TerrainPoiSystem | null;
+  private poiFootprintSystem: TerrainPoiFootprintSystem | null;
   private roadPlanner: TerrainRoadPlanner | null;
   private roadSystem: TerrainRoadSystem | null;
   private waterSystem: TerrainWaterSystem;
@@ -64,10 +67,14 @@ export class TerrainSystem {
   private foliageRadius: number;
   private foliageVisible = false;
   private poiVisible = false;
+  private poiMarkerMeshesVisible = true;
+  private poiLabelsVisible = true;
+  private poiFootprintsVisible = true;
   private roadVisible = false;
   private poiDebugConfig: TerrainPoiDebugConfig = {
     ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
-    kinds: { ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG.kinds }
+    kinds: { ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG.kinds },
+    mineResources: { ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG.mineResources }
   };
   private debugViewMode = TerrainDebugViewMode.Final;
   private materialConfig: TerrainMaterialConfig | null = null;
@@ -119,6 +126,13 @@ export class TerrainSystem {
           this.prebuiltWorld?.poiSites ?? []
         )
       : null;
+    this.poiFootprintSystem = this.poiPlanner
+      ? new TerrainPoiFootprintSystem(
+          this.scene,
+          this.generator,
+          this.prebuiltWorld?.poiSites ?? []
+        )
+      : null;
     this.roadPlanner =
       this.config.features.poi && this.config.features.roads
         ? new TerrainRoadPlanner(this.config, this.generator)
@@ -162,10 +176,17 @@ export class TerrainSystem {
     });
 
     let roads: readonly TerrainRoad[] = [];
+    const poiSites = this.poiSystem?.getSites() ?? [];
     if (this.poiSystem) {
       this.poiSystem.initialize();
       this.poiSystem.setDebugConfig(this.poiDebugConfig);
+      this.poiSystem.setMarkerMeshesVisible(this.poiMarkerMeshesVisible);
+      this.poiSystem.setLabelsVisible(this.poiLabelsVisible);
       this.poiVisible = true;
+    }
+    if (this.poiFootprintSystem) {
+      this.poiFootprintSystem.initialize();
+      this.poiFootprintSystem.setVisible(this.poiFootprintsVisible);
     }
     if (this.poiSystem && this.roadSystem) {
       this.roadSystem.initialize(this.poiSystem.getSites());
@@ -191,7 +212,8 @@ export class TerrainSystem {
           chunkZ,
           this.config,
           this.generator,
-          roads
+          roads,
+          poiSites
         );
         const chunk = new TerrainChunk(
           this.scene,
@@ -279,6 +301,7 @@ export class TerrainSystem {
     this.debugOverlayPromise = null;
     this.foliageSystem.dispose();
     this.poiSystem?.dispose();
+    this.poiFootprintSystem?.dispose();
     this.roadSystem?.dispose();
     this.waterSystem.dispose();
     this.chunks.forEach((chunk) => chunk.dispose());
@@ -464,9 +487,17 @@ export class TerrainSystem {
       this.poiSystem?.getStats() ?? {
         total: 0,
         villages: 0,
-        harbors: 0,
-        hillforts: 0,
+        taverns: 0,
         mines: 0
+      }
+    );
+  }
+
+  getPoiMeshStats(): TerrainPoiMeshStats {
+    return (
+      this.poiSystem?.getMeshStats() ?? {
+        total: 0,
+        enabled: 0
       }
     );
   }
@@ -474,7 +505,8 @@ export class TerrainSystem {
   setPoiDebugConfig(config: TerrainPoiDebugConfig): void {
     this.poiDebugConfig = {
       ...config,
-      kinds: { ...config.kinds }
+      kinds: { ...config.kinds },
+      mineResources: { ...config.mineResources }
     };
     this.poiSystem?.setDebugConfig(this.poiDebugConfig);
   }
@@ -482,7 +514,8 @@ export class TerrainSystem {
   getPoiDebugConfig(): TerrainPoiDebugConfig {
     return {
       ...this.poiDebugConfig,
-      kinds: { ...this.poiDebugConfig.kinds }
+      kinds: { ...this.poiDebugConfig.kinds },
+      mineResources: { ...this.poiDebugConfig.mineResources }
     };
   }
 
@@ -504,6 +537,33 @@ export class TerrainSystem {
 
   getShowPoi(): boolean {
     return this.poiVisible;
+  }
+
+  setPoiMarkerMeshesVisible(enabled: boolean): void {
+    this.poiMarkerMeshesVisible = enabled;
+    this.poiSystem?.setMarkerMeshesVisible(enabled);
+  }
+
+  getPoiMarkerMeshesVisible(): boolean {
+    return this.poiMarkerMeshesVisible;
+  }
+
+  setPoiLabelsVisible(enabled: boolean): void {
+    this.poiLabelsVisible = enabled;
+    this.poiSystem?.setLabelsVisible(enabled);
+  }
+
+  getPoiLabelsVisible(): boolean {
+    return this.poiLabelsVisible;
+  }
+
+  setShowPoiFootprints(enabled: boolean): void {
+    this.poiFootprintsVisible = enabled && this.config.features.poi;
+    this.poiFootprintSystem?.setVisible(this.poiFootprintsVisible);
+  }
+
+  getShowPoiFootprints(): boolean {
+    return this.poiFootprintsVisible;
   }
 
   setShowRoads(enabled: boolean): void {
@@ -592,6 +652,7 @@ export class TerrainSystem {
       this.lastChunkMeshApplyDurationMs = 0;
       await coordinator.buildChunks(
         this.config,
+        this.poiSystem?.getSites() ?? [],
         roads,
         this.prebuiltWorld?.packedSnapshot ?? packTerrainSnapshot(this.generator.createSnapshot()),
         this.buildOptions.initialCameraPosition ?? null,

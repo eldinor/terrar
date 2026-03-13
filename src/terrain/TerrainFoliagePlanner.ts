@@ -47,8 +47,14 @@ export class TerrainFoliagePlanner {
 
         const worldX = chunkData.minX + x * grid.step;
         const worldZ = chunkData.minZ + z * grid.step;
+        if (chunkData.isInsidePoiFootprint(worldX, worldZ)) {
+          continue;
+        }
         const jitterX = (hashToUnitFloat(this.seed, worldX * 2, worldZ * 2) - 0.5) * grid.step * 0.9;
         const jitterZ = (hashToUnitFloat(this.seed, worldX * 3, worldZ * 3) - 0.5) * grid.step * 0.9;
+        if (chunkData.isInsidePoiFootprint(worldX + jitterX, worldZ + jitterZ)) {
+          continue;
+        }
         const density = hashToUnitFloat(this.seed, worldX * 5, worldZ * 5);
         const kindRoll = hashToUnitFloat(this.seed, worldX * 13, worldZ * 13);
         const threshold = biome === TerrainBiome.Forest ? 0.16 : biome === TerrainBiome.Grassland ? 0.1 : 0.08;

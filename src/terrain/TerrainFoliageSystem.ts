@@ -1,10 +1,10 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { createYieldingScheduler, runCoroutineAsync } from "@babylonjs/core/Misc/coroutine";
-import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { Scene } from "@babylonjs/core/scene";
 import { TerrainChunk } from "./TerrainChunk";
 import { TerrainConfig } from "./TerrainConfig";
@@ -15,9 +15,11 @@ import {
 } from "./TerrainFoliagePlanner";
 
 type FoliageLODLevel = 0 | 1 | 2;
+type FoliageBatchMap = Record<TerrainFoliageKind, Mesh | null>;
+type FoliageMatrixMap = Record<TerrainFoliageKind, number[]>;
 
 interface TerrainFoliageChunk {
-  readonly lodMeshes: Record<FoliageLODLevel, InstancedMesh[]>;
+  readonly lodMeshes: Record<FoliageLODLevel, FoliageBatchMap>;
   readonly center: Vector3;
   readonly instanceCount: number;
   readonly kindCounts: Record<TerrainFoliageKind, number>;
@@ -82,7 +84,7 @@ export class TerrainFoliageSystem {
       const lod = this.getDesiredLod(distance);
       ([0, 1, 2] as FoliageLODLevel[]).forEach((meshLod) => {
         const lodEnabled = enabled && lod === meshLod;
-        foliageChunk.lodMeshes[meshLod].forEach((mesh) => mesh.setEnabled(lodEnabled));
+        setFoliageBatchMapEnabled(foliageChunk.lodMeshes[meshLod], lodEnabled);
       });
 
       if (enabled) {
@@ -100,9 +102,9 @@ export class TerrainFoliageSystem {
 
   dispose(): void {
     this.chunkFoliage.forEach(({ lodMeshes }) => {
-      lodMeshes[0].forEach((mesh) => mesh.dispose(false, true));
-      lodMeshes[1].forEach((mesh) => mesh.dispose(false, true));
-      lodMeshes[2].forEach((mesh) => mesh.dispose(false, true));
+      disposeFoliageBatchMap(lodMeshes[0]);
+      disposeFoliageBatchMap(lodMeshes[1]);
+      disposeFoliageBatchMap(lodMeshes[2]);
     });
     this.chunkFoliage.clear();
     this.totalInstanceCount = 0;
@@ -122,33 +124,6 @@ export class TerrainFoliageSystem {
 
     this.prototypeMaterials.forEach((material) => material.dispose(false, true));
     this.prototypeMaterials.length = 0;
-  }
-
-  private createMeshesForLods(
-    candidate: TerrainFoliageCandidate,
-    lodMeshes: Record<FoliageLODLevel, InstancedMesh[]>
-  ): void {
-    ([0, 1, 2] as FoliageLODLevel[]).forEach((lod) => {
-      const prototype = this.prototypes?.[candidate.kind]?.[lod];
-      if (!prototype) {
-        return;
-      }
-      const mesh = prototype.createInstance(
-        `${getFoliageMeshName(candidate.kind, lod)}-${Math.round(candidate.x)}-${Math.round(candidate.z)}`
-      );
-      mesh.position.set(
-        candidate.x,
-        candidate.y + getFoliageHeightOffset(candidate.kind, lod) * candidate.scale,
-        candidate.z
-      );
-      mesh.rotation.y = candidate.yaw;
-      mesh.scaling.setAll(candidate.scale * getLodScaleMultiplier(lod));
-      mesh.alwaysSelectAsActiveMesh = true;
-      mesh.isPickable = false;
-      mesh.receiveShadows = false;
-      mesh.setEnabled(false);
-      lodMeshes[lod].push(mesh);
-    });
   }
 
   private createPrototypeMaterials(): void {
@@ -173,12 +148,31 @@ export class TerrainFoliageSystem {
   private initializeChunk(chunk: TerrainChunk): void {
     const candidates = this.planner.generateCandidates(chunk.data);
     const kindCounts = createKindCounts();
-    const lodMeshes = createLodMeshes();
+    const lodMatrices = createLodMatrices();
 
     for (const candidate of candidates) {
       kindCounts[candidate.kind] += 1;
-      this.createMeshesForLods(candidate, lodMeshes);
+      this.appendCandidateToLods(candidate, lodMatrices);
     }
+
+    const lodMeshes = createFoliageBatchMaps();
+    ([0, 1, 2] as FoliageLODLevel[]).forEach((lod) => {
+      ([TerrainFoliageKind.Tree, TerrainFoliageKind.Bush, TerrainFoliageKind.Rock] as const)
+        .forEach((kind) => {
+          const prototype = this.prototypes?.[kind]?.[lod];
+          if (!prototype) {
+            return;
+          }
+
+          lodMeshes[lod][kind] = createThinInstanceBatchMesh(
+            prototype,
+            kind,
+            lod,
+            `${getFoliageMeshName(kind, lod)}-chunk-${chunk.chunkX}-${chunk.chunkZ}`,
+            lodMatrices[lod][kind]
+          );
+        });
+    });
 
     this.chunkFoliage.set(this.getChunkKey(chunk.chunkX, chunk.chunkZ), {
       lodMeshes,
@@ -190,6 +184,28 @@ export class TerrainFoliageSystem {
     this.totalKindCounts[TerrainFoliageKind.Tree] += kindCounts[TerrainFoliageKind.Tree];
     this.totalKindCounts[TerrainFoliageKind.Bush] += kindCounts[TerrainFoliageKind.Bush];
     this.totalKindCounts[TerrainFoliageKind.Rock] += kindCounts[TerrainFoliageKind.Rock];
+  }
+
+  private appendCandidateToLods(
+    candidate: TerrainFoliageCandidate,
+    lodMatrices: Record<FoliageLODLevel, FoliageMatrixMap>
+  ): void {
+    ([0, 1, 2] as FoliageLODLevel[]).forEach((lod) => {
+      const scale = candidate.scale * getLodScaleMultiplier(lod);
+      const matrix = Matrix.Compose(
+        new Vector3(scale, scale, scale),
+        Quaternion.FromEulerAngles(0, candidate.yaw, 0),
+        new Vector3(
+          candidate.x,
+          candidate.y + getFoliageHeightOffset(candidate.kind, lod) * candidate.scale,
+          candidate.z
+        )
+      );
+      matrix.copyToArray(
+        lodMatrices[lod][candidate.kind],
+        lodMatrices[lod][candidate.kind].length
+      );
+    });
   }
 
   private *initializeChunksCoroutine(
@@ -321,21 +337,76 @@ function createKindCounts(): Record<TerrainFoliageKind, number> {
   };
 }
 
-function createLodMeshes(): Record<FoliageLODLevel, InstancedMesh[]> {
+function createFoliageBatchMap(): FoliageBatchMap {
   return {
-    0: [],
-    1: [],
-    2: []
+    [TerrainFoliageKind.Tree]: null,
+    [TerrainFoliageKind.Bush]: null,
+    [TerrainFoliageKind.Rock]: null
+  };
+}
+
+function createFoliageBatchMaps(): Record<FoliageLODLevel, FoliageBatchMap> {
+  return {
+    0: createFoliageBatchMap(),
+    1: createFoliageBatchMap(),
+    2: createFoliageBatchMap()
+  };
+}
+
+function createFoliageMatrixMap(): FoliageMatrixMap {
+  return {
+    [TerrainFoliageKind.Tree]: [],
+    [TerrainFoliageKind.Bush]: [],
+    [TerrainFoliageKind.Rock]: []
+  };
+}
+
+function createLodMatrices(): Record<FoliageLODLevel, FoliageMatrixMap> {
+  return {
+    0: createFoliageMatrixMap(),
+    1: createFoliageMatrixMap(),
+    2: createFoliageMatrixMap()
   };
 }
 
 function createPrototypeMesh(mesh: Mesh, material: StandardMaterial): Mesh {
   mesh.material = material;
   mesh.isVisible = false;
-  mesh.alwaysSelectAsActiveMesh = true;
+  mesh.alwaysSelectAsActiveMesh = false;
   mesh.isPickable = false;
   mesh.receiveShadows = false;
   return mesh;
+}
+
+function createThinInstanceBatchMesh(
+  prototype: Mesh,
+  kind: TerrainFoliageKind,
+  lod: FoliageLODLevel,
+  name: string,
+  matrices: number[]
+): Mesh | null {
+  if (matrices.length === 0) {
+    return null;
+  }
+
+  const mesh = createFoliageMesh(prototype.getScene(), kind, lod, name);
+  mesh.material = prototype.material;
+  mesh.isVisible = true;
+  mesh.alwaysSelectAsActiveMesh = true;
+  mesh.isPickable = false;
+  mesh.receiveShadows = false;
+  mesh.thinInstanceSetBuffer("matrix", new Float32Array(matrices), 16, true);
+  mesh.thinInstanceRefreshBoundingInfo(true);
+  mesh.setEnabled(false);
+  return mesh;
+}
+
+function setFoliageBatchMapEnabled(batchMap: FoliageBatchMap, enabled: boolean): void {
+  Object.values(batchMap).forEach((mesh) => mesh?.setEnabled(enabled));
+}
+
+function disposeFoliageBatchMap(batchMap: FoliageBatchMap): void {
+  Object.values(batchMap).forEach((mesh) => mesh?.dispose(false, true));
 }
 
 function getLodScaleMultiplier(lod: FoliageLODLevel): number {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import { Scene } from "@babylonjs/core/scene";
 import { ProceduralGenerator } from "../src/terrain/ProceduralGenerator";
+import { TerrainChunk } from "../src/terrain/TerrainChunk";
 import { TerrainChunkData } from "../src/terrain/TerrainChunkData";
 import {
   DEFAULT_TERRAIN_CONFIG,
@@ -8,6 +11,7 @@ import {
   TerrainLODLevel
 } from "../src/terrain/TerrainConfig";
 import { TerrainFoliagePlanner } from "../src/terrain/TerrainFoliagePlanner";
+import { TerrainFoliageSystem } from "../src/terrain/TerrainFoliageSystem";
 import { getMineResourceKind, TerrainPoiPlanner } from "../src/terrain/TerrainPoiPlanner";
 import { TerrainRoadPlanner } from "../src/terrain/TerrainRoadPlanner";
 import {
@@ -317,6 +321,34 @@ describe("Foliage planning", () => {
     expect(total).toBeGreaterThan(0);
     expect(bushes).toBeGreaterThan(0);
     expect(rocks).toBeGreaterThan(0);
+  });
+
+  it("builds non-zero foliage batches with thin instances", async () => {
+    const config = mergeTerrainConfig({
+      buildFoliage: true
+    });
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const generator = new ProceduralGenerator(config);
+    const planner = new TerrainFoliagePlanner(config, config.seed);
+    const chunkData = new TerrainChunkData(5, 5, config, generator);
+    const chunk = new TerrainChunk(
+      scene,
+      chunkData,
+      {} as never,
+      config
+    );
+    const foliageSystem = new TerrainFoliageSystem(scene, planner, config);
+
+    await foliageSystem.initializeAsync([chunk]);
+
+    const stats = foliageSystem.getStats();
+    foliageSystem.dispose();
+    scene.dispose();
+    engine.dispose();
+
+    expect(stats.totalChunks).toBe(1);
+    expect(stats.totalInstances).toBeGreaterThan(0);
   });
 });
 

@@ -285,6 +285,9 @@ export function createTerrainDemo(
       }
     };
     const nextConfig = mergeTerrainConfig(mergedOverrides);
+    const nextShowFoliage =
+      nextConfig.buildFoliage &&
+      (nextConfigOverrides.buildFoliage === true || showFoliage);
     const nextBuildVersion = ++buildVersion;
     setBuildStatus({
       phase: "world",
@@ -322,7 +325,7 @@ export function createTerrainDemo(
     terrainSystem.setFoliageRadius(
       nextConfigOverrides.foliageRadius ?? foliageRadius
     );
-    terrainSystem.setShowFoliage(showFoliage);
+    terrainSystem.setShowFoliage(nextShowFoliage);
     terrainSystem.setShowPoi(showPoi);
     terrainSystem.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
     terrainSystem.setPoiLabelsVisible(poiLabelsVisible);
@@ -335,7 +338,10 @@ export function createTerrainDemo(
     terrainSystem.setWaterConfig(waterConfig);
     terrainSystem.setDebugViewMode(debugViewMode);
     terrainSystem.update(camera.position);
-    await terrainSystem.whenChunkMeshesReady();
+    await Promise.all([
+      terrainSystem.whenChunkMeshesReady(),
+      terrainSystem.whenFoliageReady()
+    ]);
     const terrainSwapDurationMs = performance.now() - terrainSwapStartedAt;
     if (nextBuildVersion !== buildVersion) {
       return;

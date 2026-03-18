@@ -50,6 +50,9 @@ export const DEFAULT_TERRAIN_POI_DEBUG_CONFIG: TerrainPoiDebugConfig = Object.fr
 });
 
 export class TerrainPoiSystem {
+  private static readonly LABEL_UPDATE_INTERVAL_FRAMES = 3;
+  private static readonly LABEL_CAMERA_MOVE_EPSILON_SQUARED = 1;
+  private static readonly LABEL_CAMERA_TARGET_MOVE_EPSILON_SQUARED = 1;
   private readonly meshes: Mesh[] = [];
   private readonly labels: HTMLDivElement[] = [];
   private readonly root: HTMLDivElement;
@@ -57,6 +60,9 @@ export class TerrainPoiSystem {
   private visible = true;
   private markerMeshesVisible = true;
   private labelsVisible = true;
+  private labelUpdateFrame = 0;
+  private lastLabelCameraPosition: Vector3 | null = null;
+  private lastLabelCameraTarget: Vector3 | null = null;
   private debugConfig: TerrainPoiDebugConfig = clonePoiDebugConfig(
     DEFAULT_TERRAIN_POI_DEBUG_CONFIG
   );
@@ -93,6 +99,12 @@ export class TerrainPoiSystem {
       return;
     }
 
+    this.labelUpdateFrame += 1;
+    const cameraTarget = getCameraTarget(camera);
+    if (!this.shouldRefreshLabels(camera.position, cameraTarget)) {
+      return;
+    }
+
     const viewport = camera.viewport.toGlobal(
       engine.getRenderWidth(),
       engine.getRenderHeight()
@@ -117,6 +129,9 @@ export class TerrainPoiSystem {
       label.style.display = siteVisible ? "block" : "none";
       label.style.transform = `translate(${projected.x}px, ${projected.y}px) translate(-50%, -100%)`;
     });
+
+    this.lastLabelCameraPosition = camera.position.clone();
+    this.lastLabelCameraTarget = cameraTarget?.clone() ?? null;
   }
 
   dispose(): void {
@@ -211,7 +226,6 @@ export class TerrainPoiSystem {
     const marker = createMarkerMesh(this.scene, site);
     const markerHeight = getPoiMarkerHeight(site);
     marker.position.set(site.x, site.y + markerHeight + 10, site.z);
-    marker.alwaysSelectAsActiveMesh = true;
     marker.isPickable = false;
     marker.renderingGroupId = 3;
     marker.billboardMode = AbstractMesh.BILLBOARDMODE_ALL;
@@ -265,7 +279,49 @@ export class TerrainPoiSystem {
         }
       }
     });
+    this.lastLabelCameraPosition = null;
+    this.lastLabelCameraTarget = null;
   }
+
+  private shouldRefreshLabels(
+    cameraPosition: Vector3,
+    cameraTarget: Vector3 | null
+  ): boolean {
+    if (!this.visible || !this.labelsVisible) {
+      return false;
+    }
+
+    if (
+      !this.lastLabelCameraPosition ||
+      !this.lastLabelCameraTarget ||
+      !cameraTarget
+    ) {
+      return true;
+    }
+
+    const positionMoved =
+      Vector3.DistanceSquared(cameraPosition, this.lastLabelCameraPosition) >=
+      TerrainPoiSystem.LABEL_CAMERA_MOVE_EPSILON_SQUARED;
+    const targetMoved =
+      Vector3.DistanceSquared(cameraTarget, this.lastLabelCameraTarget) >=
+      TerrainPoiSystem.LABEL_CAMERA_TARGET_MOVE_EPSILON_SQUARED;
+
+    if (positionMoved || targetMoved) {
+      return true;
+    }
+
+    return (
+      this.labelUpdateFrame % TerrainPoiSystem.LABEL_UPDATE_INTERVAL_FRAMES === 0
+    );
+  }
+}
+
+function getCameraTarget(camera: Scene["activeCamera"]): Vector3 | null {
+  if (!camera || typeof (camera as { getTarget?: unknown }).getTarget !== "function") {
+    return null;
+  }
+
+  return (camera as unknown as { getTarget: () => Vector3 }).getTarget();
 }
 
 function createMarkerMesh(scene: Scene, site: TerrainPoi): Mesh {

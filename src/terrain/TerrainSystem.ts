@@ -339,6 +339,10 @@ export class TerrainSystem {
     return this.chunkBuildPromise ?? Promise.resolve();
   }
 
+  whenFoliageReady(): Promise<void> {
+    return this.foliageInitPromise ?? Promise.resolve();
+  }
+
   getPendingChunkMeshCount(): number {
     return this.pendingChunkMeshQueue.length;
   }

@@ -427,10 +427,12 @@ function renderRuntimeTab(): void {
       if (!checked) {
         draftConfig.showFoliage = false;
         demo.setShowFoliage(false);
-      } else if (draftConfig.showFoliage) {
+      } else {
+        draftConfig.showFoliage = true;
         demo.setShowFoliage(true);
       }
       renderHud();
+      runAsyncTask(applyDraftToWorld());
     }),
   );
   panel.appendChild(

@@ -80,8 +80,10 @@ export class TerrainFoliageSystem {
       const dx = cameraPosition.x - foliageChunk.center.x;
       const dz = cameraPosition.z - foliageChunk.center.z;
       const distance = Math.sqrt(dx * dx + dz * dz);
-      const enabled = distance < visibleRadius;
       const lod = this.getDesiredLod(distance);
+      const enabled =
+        distance < visibleRadius &&
+        isFoliageBatchMapInFrustum(foliageChunk.lodMeshes[lod], this.scene);
       ([0, 1, 2] as FoliageLODLevel[]).forEach((meshLod) => {
         const lodEnabled = enabled && lod === meshLod;
         setFoliageBatchMapEnabled(foliageChunk.lodMeshes[meshLod], lodEnabled);
@@ -392,7 +394,7 @@ function createThinInstanceBatchMesh(
   const mesh = createFoliageMesh(prototype.getScene(), kind, lod, name);
   mesh.material = prototype.material;
   mesh.isVisible = true;
-  mesh.alwaysSelectAsActiveMesh = true;
+  mesh.alwaysSelectAsActiveMesh = false;
   mesh.isPickable = false;
   mesh.receiveShadows = false;
   mesh.thinInstanceSetBuffer("matrix", new Float32Array(matrices), 16, true);
@@ -403,6 +405,15 @@ function createThinInstanceBatchMesh(
 
 function setFoliageBatchMapEnabled(batchMap: FoliageBatchMap, enabled: boolean): void {
   Object.values(batchMap).forEach((mesh) => mesh?.setEnabled(enabled));
+}
+
+function isFoliageBatchMapInFrustum(batchMap: FoliageBatchMap, scene: Scene): boolean {
+  const frustumPlanes = scene.frustumPlanes;
+  if (!frustumPlanes || frustumPlanes.length === 0) {
+    return true;
+  }
+
+  return Object.values(batchMap).some((mesh) => mesh !== null && mesh.isInFrustum(frustumPlanes));
 }
 
 function disposeFoliageBatchMap(batchMap: FoliageBatchMap): void {

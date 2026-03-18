@@ -266,18 +266,36 @@ export class TerrainSystem {
 
     this.elapsedTimeSeconds += this.scene.getEngine().getDeltaTime() * 0.001;
 
+    const frustumPlanes = this.scene.frustumPlanes;
+    const offscreenLodDistance = this.lodDistances[1] + this.config.chunkSize;
     const desiredLods: TerrainLODLevel[][] = [];
+    const chunkDistances: number[][] = [];
+    const chunkFrustumStates: boolean[][] = [];
 
     for (let chunkZ = 0; chunkZ < this.config.chunksPerAxis; chunkZ += 1) {
       const row: TerrainLODLevel[] = [];
+      const distanceRow: number[] = [];
+      const frustumRow: boolean[] = [];
 
       for (let chunkX = 0; chunkX < this.config.chunksPerAxis; chunkX += 1) {
         const chunk = this.chunkGrid[chunkZ][chunkX];
         const distance = chunk.distanceTo(cameraPosition);
-        row.push(this.getDesiredLod(distance));
+        const isInFrustum =
+          !frustumPlanes ||
+          frustumPlanes.length === 0 ||
+          chunk.isInFrustum(frustumPlanes);
+        distanceRow.push(distance);
+        frustumRow.push(isInFrustum);
+        row.push(
+          isInFrustum || distance < offscreenLodDistance
+            ? this.getDesiredLod(distance)
+            : 3
+        );
       }
 
       desiredLods.push(row);
+      chunkDistances.push(distanceRow);
+      chunkFrustumStates.push(frustumRow);
     }
 
     const stabilized = this.lodController.stabilizeLodGrid(desiredLods);
@@ -285,8 +303,13 @@ export class TerrainSystem {
     for (let chunkZ = 0; chunkZ < this.config.chunksPerAxis; chunkZ += 1) {
       for (let chunkX = 0; chunkX < this.config.chunksPerAxis; chunkX += 1) {
         const chunk = this.chunkGrid[chunkZ][chunkX];
-        const distance = chunk.distanceTo(cameraPosition);
-        chunk.setLOD(stabilized[chunkZ][chunkX]);
+        const distance = chunkDistances[chunkZ][chunkX];
+        const isInFrustum = chunkFrustumStates[chunkZ][chunkX];
+        chunk.setLOD(
+          isInFrustum || distance < offscreenLodDistance
+            ? stabilized[chunkZ][chunkX]
+            : 3
+        );
         chunk.setCollision(distance < this.collisionRadius);
       }
     }

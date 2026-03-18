@@ -65,6 +65,20 @@ export class TerrainChunk {
     return Math.sqrt(dx * dx + dz * dz);
   }
 
+  isInFrustum(frustumPlanes: Parameters<Mesh["isInFrustum"]>[0]): boolean {
+    const activeMesh =
+      this.meshes.get(this.getLOD()) ??
+      this.meshes.get(0) ??
+      this.meshes.get(1) ??
+      this.meshes.get(2) ??
+      this.meshes.get(3);
+    if (!activeMesh) {
+      return true;
+    }
+
+    return activeMesh.isInFrustum(frustumPlanes);
+  }
+
   setLOD(lod: TerrainLODLevel): void {
     if (lod === this.activeLod && this.meshes.size > 0) {
       return;

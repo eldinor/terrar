@@ -35,6 +35,7 @@ export class TerrainChunkData {
   readonly centerZ: number;
   readonly centerHeight: number;
   readonly grids: ReadonlyMap<TerrainLODLevel, TerrainSampleGrid>;
+  private readonly mutableGrids = new Map<TerrainLODLevel, TerrainSampleGrid>();
 
   constructor(
     readonly chunkX: number,
@@ -51,13 +52,15 @@ export class TerrainChunkData {
     this.centerX = this.minX + config.chunkSize * 0.5;
     this.centerZ = this.minZ + config.chunkSize * 0.5;
     this.centerHeight = this.sampleShapedHeight(this.centerX, this.centerZ);
-    this.grids = this.generateAllLods();
+    this.grids = this.mutableGrids;
   }
 
   getGrid(lod: TerrainLODLevel): TerrainSampleGrid {
-    const grid = this.grids.get(lod);
+    let grid = this.mutableGrids.get(lod);
     if (!grid) {
-      throw new Error(`Missing terrain grid for LOD ${lod}.`);
+      const resolution = this.config.lodResolutions[lod];
+      grid = this.generateGrid(resolution);
+      this.mutableGrids.set(lod, grid);
     }
     return grid;
   }
@@ -70,16 +73,6 @@ export class TerrainChunkData {
     const gradientX = (right - left) / (sampleStep * 2);
     const gradientZ = (up - down) / (sampleStep * 2);
     return new Vector3(-gradientX, 1, -gradientZ).normalize();
-  }
-
-  private generateAllLods(): ReadonlyMap<TerrainLODLevel, TerrainSampleGrid> {
-    const grids = new Map<TerrainLODLevel, TerrainSampleGrid>();
-
-    this.config.lodResolutions.forEach((resolution, index) => {
-      grids.set(index as TerrainLODLevel, this.generateGrid(resolution));
-    });
-
-    return grids;
   }
 
   private generateGrid(resolution: number): TerrainSampleGrid {

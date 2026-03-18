@@ -78,14 +78,15 @@ export class TerrainMeshBuilder {
     material: ShaderMaterial
   ): void {
     const vertexData = new VertexData();
-    vertexData.positions = Array.from(meshData.positions);
-    vertexData.indices = Array.from(meshData.indices);
-    vertexData.normals = Array.from(meshData.normals);
-    vertexData.uvs = Array.from(meshData.uvs);
-    vertexData.uvs2 = Array.from(meshData.uvs2);
-    vertexData.uvs3 = Array.from(meshData.uvs3);
-    vertexData.uvs4 = Array.from(meshData.uvs4);
-    vertexData.colors = Array.from(meshData.colors);
+    // Keep worker-produced typed arrays intact to avoid a full copy on the main thread.
+    vertexData.positions = meshData.positions;
+    vertexData.indices = meshData.indices;
+    vertexData.normals = meshData.normals;
+    vertexData.uvs = meshData.uvs;
+    vertexData.uvs2 = meshData.uvs2;
+    vertexData.uvs3 = meshData.uvs3;
+    vertexData.uvs4 = meshData.uvs4;
+    vertexData.colors = meshData.colors;
     vertexData.applyToMesh(mesh, true);
     mesh.material = material;
     mesh.isPickable = false;

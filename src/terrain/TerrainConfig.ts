@@ -62,6 +62,7 @@ export interface TerrainConfig {
   readonly lodResolutions: readonly [129, 65, 33, 17];
   readonly lodDistances: readonly [number, number, number];
   readonly foliageLodDistances: readonly [number, number];
+  readonly buildFoliage: boolean;
   readonly collisionRadius: number;
   readonly foliageRadius: number;
   readonly waterLevel: number;
@@ -145,6 +146,7 @@ export const DEFAULT_TERRAIN_CONFIG: TerrainConfig = Object.freeze({
   lodResolutions: TERRAIN_LOD_RESOLUTIONS,
   lodDistances: [160, 320, 520] as const,
   foliageLodDistances: [240, 420] as const,
+  buildFoliage: false,
   collisionRadius: 220,
   foliageRadius: 700,
   waterLevel: 0,
@@ -217,6 +219,7 @@ export function mergeTerrainConfig(overrides: TerrainConfigOverrides = {}): Terr
     lodDistances: (overrides.lodDistances ?? DEFAULT_TERRAIN_CONFIG.lodDistances) as TerrainConfig["lodDistances"],
     foliageLodDistances: (overrides.foliageLodDistances ??
       DEFAULT_TERRAIN_CONFIG.foliageLodDistances) as TerrainConfig["foliageLodDistances"],
+    buildFoliage: overrides.buildFoliage ?? DEFAULT_TERRAIN_CONFIG.buildFoliage,
     collisionRadius: overrides.collisionRadius ?? DEFAULT_TERRAIN_CONFIG.collisionRadius,
     foliageRadius: overrides.foliageRadius ?? DEFAULT_TERRAIN_CONFIG.foliageRadius,
     waterLevel: overrides.waterLevel ?? DEFAULT_TERRAIN_CONFIG.waterLevel,

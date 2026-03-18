@@ -86,6 +86,8 @@ export class TerrainSystem {
   private pendingChunkMeshQueue: PendingChunkMeshBuild[] = [];
   private chunkMeshApplyPromise: Promise<void> | null = null;
   private chunkMeshApplyAbortController: AbortController | null = null;
+  private foliageInitPromise: Promise<void> | null = null;
+  private foliageInitAbortController: AbortController | null = null;
   private lastChunkBuildDurationMs = 0;
   private lastChunkMeshApplyDurationMs = 0;
 
@@ -154,6 +156,7 @@ export class TerrainSystem {
     this.lodDistances = [...this.config.lodDistances];
     this.collisionRadius = this.config.collisionRadius;
     this.foliageRadius = this.config.foliageRadius;
+    this.foliageVisible = this.config.buildFoliage;
   }
 
   initialize(): void {
@@ -229,7 +232,20 @@ export class TerrainSystem {
     }
 
     this.initialized = true;
-    this.foliageSystem.initialize(this.chunks);
+    if (this.config.buildFoliage) {
+      this.foliageInitAbortController?.abort();
+      this.foliageInitAbortController = new AbortController();
+      this.foliageInitPromise = this.foliageSystem
+        .initializeAsync(this.chunks, this.foliageInitAbortController.signal)
+        .catch((error) => {
+          if (!this.foliageInitAbortController?.signal.aborted) {
+            console.error("Foliage initialization failed.", error);
+          }
+        })
+        .finally(() => {
+          this.foliageInitPromise = null;
+        });
+    }
     this.waterSystem.initialize();
     if (this.buildOptions.chunkBuildCoordinator) {
       this.chunkBuildPromise = this.buildChunkMeshesAsync(roads);
@@ -294,6 +310,9 @@ export class TerrainSystem {
     TerrainSystem.liveSystemCount = Math.max(0, TerrainSystem.liveSystemCount - 1);
     this.chunkMeshApplyAbortController?.abort();
     this.chunkMeshApplyAbortController = null;
+    this.foliageInitAbortController?.abort();
+    this.foliageInitAbortController = null;
+    this.foliageInitPromise = null;
     this.pendingChunkMeshQueue = [];
     this.chunkMeshApplyPromise = null;
     this.debugOverlay?.dispose();
@@ -451,7 +470,7 @@ export class TerrainSystem {
   }
 
   setShowFoliage(enabled: boolean): void {
-    this.foliageVisible = enabled;
+    this.foliageVisible = enabled && this.config.buildFoliage;
   }
 
   getShowFoliage(): boolean {

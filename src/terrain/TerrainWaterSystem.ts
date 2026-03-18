@@ -4,6 +4,7 @@ import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { createYieldingScheduler, runCoroutineAsync } from "@babylonjs/core/Misc/coroutine";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -76,6 +77,9 @@ export class TerrainWaterSystem {
   private terrainHeightTexture: RawTexture | null = null;
   private waterLevel: number;
   private waterConfig: TerrainWaterConfig = { ...DEFAULT_TERRAIN_WATER_CONFIG };
+  private buildGeneration = 0;
+  private buildAbortController: AbortController | null = null;
+  private rebuildPromise: Promise<void> | null = null;
 
   constructor(
     private readonly scene: Scene,
@@ -92,10 +96,10 @@ export class TerrainWaterSystem {
 
     registerWaterShaders();
     this.oceanMesh = this.createOceanMesh();
-    this.terrainHeightTexture = this.createTerrainHeightTexture();
+    this.terrainHeightTexture = this.createEmptyTerrainHeightTexture();
     this.oceanMaterial = this.createMaterial("terrain-water-material");
     this.oceanMesh.material = this.oceanMaterial;
-    this.rebuildInlandMeshes();
+    this.scheduleRebuild();
     this.updateMeshHeight();
   }
 
@@ -133,7 +137,7 @@ export class TerrainWaterSystem {
       previousConfig.inlandMeshResolution !== this.waterConfig.inlandMeshResolution ||
       previousConfig.inlandSmoothingPasses !== this.waterConfig.inlandSmoothingPasses
     ) {
-      this.rebuildInlandMeshes();
+      this.scheduleRebuild();
     } else {
       if (this.riverMaterial) {
         this.applyConfigToMaterial(this.riverMaterial, this.getRiverConfig(), this.getRiverStyle());
@@ -163,6 +167,10 @@ export class TerrainWaterSystem {
     this.riverMaterial = null;
     this.lakeMaterial = null;
     this.terrainHeightTexture = null;
+    this.buildGeneration += 1;
+    this.buildAbortController?.abort();
+    this.buildAbortController = null;
+    this.rebuildPromise = null;
   }
 
   private createOceanMesh(): Mesh {
@@ -290,6 +298,32 @@ export class TerrainWaterSystem {
     return mesh;
   }
 
+  private createInlandMeshFromBuffers(
+    kind: "river" | "lake",
+    positions: number[],
+    indices: number[],
+    uvs: number[]
+  ): Mesh | null {
+    if (positions.length === 0) {
+      return null;
+    }
+
+    const normals = new Array<number>(positions.length).fill(0);
+    VertexData.ComputeNormals(positions, indices, normals);
+
+    const mesh = new Mesh(kind === "river" ? "terrain-rivers" : "terrain-lakes", this.scene);
+    const vertexData = new VertexData();
+    vertexData.positions = positions;
+    vertexData.indices = indices;
+    vertexData.normals = normals;
+    vertexData.uvs = uvs;
+    vertexData.applyToMesh(mesh, true);
+    mesh.isPickable = false;
+    mesh.renderingGroupId = 0;
+    mesh.freezeWorldMatrix();
+    return mesh;
+  }
+
   private createInlandWaterGrid(
     resolution: number,
     step: number
@@ -313,6 +347,38 @@ export class TerrainWaterSystem {
       Math.max(0, Math.round(this.waterConfig.inlandSmoothingPasses))
     );
     return vertices;
+  }
+
+  private *createInlandWaterGridCoroutine(
+    resolution: number,
+    step: number,
+    target: InlandWaterVertex[],
+    abortSignal?: AbortSignal
+  ) {
+    for (let gridZ = 0; gridZ < resolution; gridZ += 1) {
+      if (abortSignal?.aborted) {
+        return;
+      }
+
+      for (let gridX = 0; gridX < resolution; gridX += 1) {
+        target[this.toGridIndex(gridX, gridZ, resolution)] = this.sampleRiverCorner(
+          gridX,
+          gridZ,
+          step,
+          resolution
+        );
+      }
+      yield;
+    }
+
+    const smoothingPasses = Math.max(0, Math.round(this.waterConfig.inlandSmoothingPasses));
+    for (let pass = 0; pass < smoothingPasses; pass += 1) {
+      if (abortSignal?.aborted) {
+        return;
+      }
+      smoothInlandWaterGrid(target, resolution, 1);
+      yield;
+    }
   }
 
   private sampleRiverCorner(
@@ -350,40 +416,6 @@ export class TerrainWaterSystem {
       u: gridX / Math.max(1, resolution - 1),
       v: gridZ / Math.max(1, resolution - 1)
     };
-  }
-
-  private rebuildInlandMeshes(): void {
-    this.disposeInlandMeshes();
-
-    if (!this.config.rivers.enabled) {
-      return;
-    }
-
-    const inlandResolution = this.resolveInlandResolution();
-    const inlandGrid = this.createInlandWaterGrid(
-      inlandResolution,
-      this.config.worldSize / (inlandResolution - 1)
-    );
-    this.riverMesh = this.createInlandMesh(inlandGrid, "river");
-    this.lakeMesh = this.createInlandMesh(inlandGrid, "lake");
-
-    if (this.riverMesh) {
-      this.riverMaterial = this.createMaterial(
-        "terrain-river-material",
-        this.getRiverConfig(),
-        this.getRiverStyle()
-      );
-      this.riverMesh.material = this.riverMaterial;
-    }
-
-    if (this.lakeMesh) {
-      this.lakeMaterial = this.createMaterial(
-        "terrain-lake-material",
-        this.getLakeConfig(),
-        this.getLakeStyle()
-      );
-      this.lakeMesh.material = this.lakeMaterial;
-    }
   }
 
   private disposeInlandMeshes(): void {
@@ -524,23 +556,9 @@ export class TerrainWaterSystem {
     this.oceanMesh.position.y = this.waterLevel + WATER_SURFACE_OFFSET;
   }
 
-  private createTerrainHeightTexture(): RawTexture {
+  private createEmptyTerrainHeightTexture(): RawTexture {
     const size = WATER_MASK_RESOLUTION;
     const data = new Uint8Array(size * size);
-    const heightRange = Math.max(this.config.maxHeight - this.config.baseHeight, 1);
-
-    for (let z = 0; z < size; z += 1) {
-      for (let x = 0; x < size; x += 1) {
-        const u = x / (size - 1);
-        const v = z / (size - 1);
-        const worldX = this.config.worldMin + u * this.config.worldSize;
-        const worldZ = this.config.worldMin + v * this.config.worldSize;
-        const height = this.generator.sample(worldX, worldZ).height;
-        const normalizedHeight = (height - this.config.baseHeight) / heightRange;
-        data[z * size + x] = Math.round(Math.max(0, Math.min(1, normalizedHeight)) * 255);
-      }
-    }
-
     const texture = RawTexture.CreateLuminanceTexture(
       data,
       size,
@@ -553,6 +571,325 @@ export class TerrainWaterSystem {
     texture.wrapU = Texture.CLAMP_ADDRESSMODE;
     texture.wrapV = Texture.CLAMP_ADDRESSMODE;
     return texture;
+  }
+
+  private *buildTerrainHeightTextureDataCoroutine(
+    target: Uint8Array,
+    abortSignal?: AbortSignal
+  ) {
+    const size = WATER_MASK_RESOLUTION;
+    const heightRange = Math.max(this.config.maxHeight - this.config.baseHeight, 1);
+
+    for (let z = 0; z < size; z += 1) {
+      if (abortSignal?.aborted) {
+        return;
+      }
+
+      for (let x = 0; x < size; x += 1) {
+        const u = x / (size - 1);
+        const v = z / (size - 1);
+        const worldX = this.config.worldMin + u * this.config.worldSize;
+        const worldZ = this.config.worldMin + v * this.config.worldSize;
+        const height = this.generator.sample(worldX, worldZ).height;
+        const normalizedHeight = (height - this.config.baseHeight) / heightRange;
+        target[z * size + x] = Math.round(Math.max(0, Math.min(1, normalizedHeight)) * 255);
+      }
+      yield;
+    }
+  }
+
+  private scheduleRebuild(): void {
+    this.buildGeneration += 1;
+    const generation = this.buildGeneration;
+    this.buildAbortController?.abort();
+    const abortController = new AbortController();
+    this.buildAbortController = abortController;
+    this.rebuildPromise = this.rebuildAsync(generation, abortController.signal)
+      .catch((error) => {
+        if (!abortController.signal.aborted) {
+          console.error("Water rebuild failed.", error);
+        }
+      })
+      .finally(() => {
+        if (this.buildAbortController === abortController) {
+          this.buildAbortController = null;
+        }
+        if (this.buildGeneration === generation) {
+          this.rebuildPromise = null;
+        }
+      });
+  }
+
+  private async rebuildAsync(
+    generation: number,
+    abortSignal: AbortSignal
+  ): Promise<void> {
+    const heightData = new Uint8Array(WATER_MASK_RESOLUTION * WATER_MASK_RESOLUTION);
+    await runCoroutineAsync(
+      this.buildTerrainHeightTextureDataCoroutine(heightData, abortSignal),
+      createYieldingScheduler(6),
+      abortSignal
+    );
+    if (abortSignal.aborted || generation !== this.buildGeneration) {
+      return;
+    }
+
+    const nextTexture = RawTexture.CreateLuminanceTexture(
+      heightData,
+      WATER_MASK_RESOLUTION,
+      WATER_MASK_RESOLUTION,
+      this.scene,
+      false,
+      false,
+      Texture.TRILINEAR_SAMPLINGMODE
+    );
+    nextTexture.wrapU = Texture.CLAMP_ADDRESSMODE;
+    nextTexture.wrapV = Texture.CLAMP_ADDRESSMODE;
+
+    const nextInland = this.config.rivers.enabled
+      ? await this.buildInlandMeshesAsync(abortSignal)
+      : { riverMesh: null, lakeMesh: null, riverMaterial: null, lakeMaterial: null };
+    if (abortSignal.aborted || generation !== this.buildGeneration) {
+      nextTexture.dispose();
+      nextInland.riverMesh?.dispose(false, true);
+      nextInland.lakeMesh?.dispose(false, true);
+      nextInland.riverMaterial?.dispose(false, true);
+      nextInland.lakeMaterial?.dispose(false, true);
+      return;
+    }
+
+    this.applyTerrainHeightTexture(nextTexture);
+    this.swapInlandMeshes(nextInland);
+  }
+
+  private async buildInlandMeshesAsync(
+    abortSignal: AbortSignal
+  ): Promise<{
+    riverMesh: Mesh | null;
+    lakeMesh: Mesh | null;
+    riverMaterial: ShaderMaterial | null;
+    lakeMaterial: ShaderMaterial | null;
+  }> {
+    const inlandResolution = this.resolveInlandResolution();
+    const inlandGrid = new Array<InlandWaterVertex>(inlandResolution * inlandResolution);
+    await runCoroutineAsync(
+      this.createInlandWaterGridCoroutine(
+        inlandResolution,
+        this.config.worldSize / (inlandResolution - 1),
+        inlandGrid,
+        abortSignal
+      ),
+      createYieldingScheduler(6),
+      abortSignal
+    );
+    if (abortSignal.aborted) {
+      return {
+        riverMesh: null,
+        lakeMesh: null,
+        riverMaterial: null,
+        lakeMaterial: null
+      };
+    }
+
+    const riverBuffers = await this.buildInlandMeshBuffersAsync(inlandGrid, "river", abortSignal);
+    const lakeBuffers = await this.buildInlandMeshBuffersAsync(inlandGrid, "lake", abortSignal);
+    if (abortSignal.aborted) {
+      return {
+        riverMesh: null,
+        lakeMesh: null,
+        riverMaterial: null,
+        lakeMaterial: null
+      };
+    }
+
+    const riverMesh = riverBuffers
+      ? this.createInlandMeshFromBuffers("river", riverBuffers.positions, riverBuffers.indices, riverBuffers.uvs)
+      : null;
+    const lakeMesh = lakeBuffers
+      ? this.createInlandMeshFromBuffers("lake", lakeBuffers.positions, lakeBuffers.indices, lakeBuffers.uvs)
+      : null;
+    const riverMaterial = riverMesh
+      ? this.createMaterial(
+          "terrain-river-material",
+          this.getRiverConfig(),
+          this.getRiverStyle()
+        )
+      : null;
+    const lakeMaterial = lakeMesh
+      ? this.createMaterial(
+          "terrain-lake-material",
+          this.getLakeConfig(),
+          this.getLakeStyle()
+        )
+      : null;
+
+    if (riverMesh && riverMaterial) {
+      riverMesh.material = riverMaterial;
+    }
+    if (lakeMesh && lakeMaterial) {
+      lakeMesh.material = lakeMaterial;
+    }
+
+    return {
+      riverMesh,
+      lakeMesh,
+      riverMaterial,
+      lakeMaterial
+    };
+  }
+
+  private async buildInlandMeshBuffersAsync(
+    inlandGrid: InlandWaterVertex[],
+    kind: "river" | "lake",
+    abortSignal: AbortSignal
+  ): Promise<{ positions: number[]; indices: number[]; uvs: number[] } | null> {
+    const resolution = this.resolveInlandResolution();
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const uvs: number[] = [];
+
+    await runCoroutineAsync(
+      this.buildInlandMeshBuffersCoroutine(
+        inlandGrid,
+        kind,
+        resolution,
+        positions,
+        indices,
+        uvs,
+        abortSignal
+      ),
+      createYieldingScheduler(6),
+      abortSignal
+    );
+    if (abortSignal.aborted || positions.length === 0) {
+      return null;
+    }
+
+    return { positions, indices, uvs };
+  }
+
+  private *buildInlandMeshBuffersCoroutine(
+    inlandGrid: InlandWaterVertex[],
+    kind: "river" | "lake",
+    resolution: number,
+    positions: number[],
+    indices: number[],
+    uvs: number[],
+    abortSignal?: AbortSignal
+  ) {
+    let vertexOffset = 0;
+
+    for (let z = 0; z < resolution - 1; z += 1) {
+      if (abortSignal?.aborted) {
+        return;
+      }
+
+      for (let x = 0; x < resolution - 1; x += 1) {
+        const corners = [
+          inlandGrid[this.toGridIndex(x, z, resolution)],
+          inlandGrid[this.toGridIndex(x + 1, z, resolution)],
+          inlandGrid[this.toGridIndex(x + 1, z + 1, resolution)],
+          inlandGrid[this.toGridIndex(x, z + 1, resolution)]
+        ] as const;
+        const maxRiverMeshSignal = Math.max(
+          corners[0].riverMeshSignal,
+          corners[1].riverMeshSignal,
+          corners[2].riverMeshSignal,
+          corners[3].riverMeshSignal
+        );
+        const maxRiverWidth = Math.max(
+          corners[0].riverWidth,
+          corners[1].riverWidth,
+          corners[2].riverWidth,
+          corners[3].riverWidth
+        );
+        const maxInlandWater = Math.max(
+          Math.max(corners[0].river, corners[0].lake),
+          Math.max(corners[1].river, corners[1].lake),
+          Math.max(corners[2].river, corners[2].lake),
+          Math.max(corners[3].river, corners[3].lake)
+        );
+        const maxLakeSignal = Math.max(
+          corners[0].lake,
+          corners[1].lake,
+          corners[2].lake,
+          corners[3].lake
+        );
+
+        if (
+          kind === "river" &&
+          (
+            maxRiverMeshSignal <= this.waterConfig.riverMeshThreshold ||
+            maxRiverWidth < this.waterConfig.riverMeshMinWidth
+          )
+        ) {
+          continue;
+        }
+
+        if (kind === "lake" && maxLakeSignal <= this.waterConfig.lakeMeshThreshold) {
+          continue;
+        }
+
+        if (
+          maxInlandWater <= this.waterConfig.lakeMeshThreshold &&
+          maxRiverMeshSignal <= this.waterConfig.riverMeshThreshold
+        ) {
+          continue;
+        }
+
+        const polygon =
+          kind === "lake"
+            ? clipInlandPolygon(
+                corners,
+                this.waterConfig.lakeMeshThreshold,
+                (vertex) => vertex.lake
+              )
+            : corners.slice();
+
+        if (polygon.length < 3) {
+          continue;
+        }
+
+        polygon.forEach((corner) => {
+          positions.push(corner.x, corner.y, corner.z);
+          uvs.push(corner.u, corner.v);
+        });
+
+        for (let triangle = 1; triangle < polygon.length - 1; triangle += 1) {
+          indices.push(
+            vertexOffset,
+            vertexOffset + triangle + 1,
+            vertexOffset + triangle
+          );
+        }
+        vertexOffset += polygon.length;
+      }
+
+      yield;
+    }
+  }
+
+  private applyTerrainHeightTexture(texture: RawTexture): void {
+    this.terrainHeightTexture?.dispose();
+    this.terrainHeightTexture = texture;
+    [this.oceanMaterial, this.riverMaterial, this.lakeMaterial].forEach((material) => {
+      if (material) {
+        material.setTexture("terrainHeightMap", texture);
+      }
+    });
+  }
+
+  private swapInlandMeshes(next: {
+    riverMesh: Mesh | null;
+    lakeMesh: Mesh | null;
+    riverMaterial: ShaderMaterial | null;
+    lakeMaterial: ShaderMaterial | null;
+  }): void {
+    this.disposeInlandMeshes();
+    this.riverMesh = next.riverMesh;
+    this.lakeMesh = next.lakeMesh;
+    this.riverMaterial = next.riverMaterial;
+    this.lakeMaterial = next.lakeMaterial;
   }
 
   private applyConfigToMaterial(

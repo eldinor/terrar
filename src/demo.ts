@@ -73,7 +73,7 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
         resolution: 257,
         flowThreshold: 0.64,
         bankStrength: 0.74,
-        lakeThreshold: 1.85,
+        lakeThreshold: 2.5,
         depth: 1.8,
         maxDepth: 5.5,
         minSlope: 0.01,
@@ -421,6 +421,18 @@ function renderRuntimeTab(): void {
   );
   panel.appendChild(createDivider());
   panel.appendChild(createSectionLabel("Camera Radius"));
+  panel.appendChild(
+    createCheckbox("Build Foliage", draftConfig.buildFoliage, (checked) => {
+      draftConfig.buildFoliage = checked;
+      if (!checked) {
+        draftConfig.showFoliage = false;
+        demo.setShowFoliage(false);
+      } else if (draftConfig.showFoliage) {
+        demo.setShowFoliage(true);
+      }
+      renderHud();
+    }),
+  );
   panel.appendChild(
     createCheckbox("Show Foliage", draftConfig.showFoliage, (checked) => {
       draftConfig.showFoliage = checked;
@@ -1373,6 +1385,7 @@ function buildDraftConfig(): DraftConfig {
     waterLevel: demo.getWaterLevel(),
     water: { ...demo.getWaterConfig() },
     collisionRadius: demo.getCollisionRadius(),
+    buildFoliage: config.buildFoliage,
     foliageRadius: demo.getFoliageRadius(),
     showFoliage: demo.getShowFoliage(),
     showPoi: demo.getTerrainConfig().features.poi,
@@ -1411,6 +1424,7 @@ function buildTerrainOverridesFromDraft(): TerrainConfigOverrides {
     maxHeight: draftConfig.maxHeight,
     waterLevel: draftConfig.waterLevel,
     collisionRadius: draftConfig.collisionRadius,
+    buildFoliage: draftConfig.buildFoliage,
     foliageRadius: draftConfig.foliageRadius,
     lodDistances: draftConfig.lodDistances,
     erosion: { ...draftConfig.erosion },
@@ -1435,8 +1449,9 @@ function mergeDraftWithOverrides(base: DraftConfig, overrides: TerrainConfigOver
     waterLevel: overrides.waterLevel ?? base.waterLevel,
     water: { ...base.water },
     collisionRadius: overrides.collisionRadius ?? base.collisionRadius,
+    buildFoliage: overrides.buildFoliage ?? base.buildFoliage,
     foliageRadius: overrides.foliageRadius ?? base.foliageRadius,
-    showFoliage: base.showFoliage,
+    showFoliage: (overrides.buildFoliage ?? base.buildFoliage) ? base.showFoliage : false,
     showPoi: overrides.features?.poi ?? base.showPoi,
     hidePoiMarkerMeshes: base.hidePoiMarkerMeshes,
     hidePoiLabels: base.hidePoiLabels,
@@ -1569,11 +1584,13 @@ function downloadJsonFile(filename: string, payload: TerrainPreset): void {
 }
 
 function slugifyPresetName(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "terrain-preset";
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "terrain-preset"
+  );
 }
 
 interface TerrainPresetRecord {
@@ -1784,6 +1801,7 @@ interface DraftConfig {
   waterLevel: number;
   water: MutableTerrainWaterConfig;
   collisionRadius: number;
+  buildFoliage: boolean;
   foliageRadius: number;
   showFoliage: boolean;
   showPoi: boolean;

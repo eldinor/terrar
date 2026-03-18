@@ -1,6 +1,7 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { createYieldingScheduler, runCoroutineAsync } from "@babylonjs/core/Misc/coroutine";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
@@ -46,26 +47,26 @@ export class TerrainFoliageSystem {
     this.prototypes = this.createPrototypes();
 
     for (const chunk of chunks) {
-      const candidates = this.planner.generateCandidates(chunk.data);
-      const kindCounts = createKindCounts();
-      const lodMeshes = createLodMeshes();
-
-      for (const candidate of candidates) {
-        kindCounts[candidate.kind] += 1;
-        this.createMeshesForLods(candidate, lodMeshes);
-      }
-
-      this.chunkFoliage.set(this.getChunkKey(chunk.chunkX, chunk.chunkZ), {
-        lodMeshes,
-        center: chunk.center.clone(),
-        instanceCount: candidates.length,
-        kindCounts
-      });
-      this.totalInstanceCount += candidates.length;
-      this.totalKindCounts[TerrainFoliageKind.Tree] += kindCounts[TerrainFoliageKind.Tree];
-      this.totalKindCounts[TerrainFoliageKind.Bush] += kindCounts[TerrainFoliageKind.Bush];
-      this.totalKindCounts[TerrainFoliageKind.Rock] += kindCounts[TerrainFoliageKind.Rock];
+      this.initializeChunk(chunk);
     }
+  }
+
+  initializeAsync(
+    chunks: readonly TerrainChunk[],
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    if (this.prototypes) {
+      return Promise.resolve();
+    }
+
+    this.createPrototypeMaterials();
+    this.prototypes = this.createPrototypes();
+
+    return runCoroutineAsync(
+      this.initializeChunksCoroutine(chunks, abortSignal),
+      createYieldingScheduler(6),
+      abortSignal
+    );
   }
 
   update(cameraPosition: Vector3, visibleRadius: number): void {
@@ -167,6 +168,41 @@ export class TerrainFoliageSystem {
     rockMaterial.specularColor = Color3.Black();
 
     this.prototypeMaterials.push(treeMaterial, bushMaterial, rockMaterial);
+  }
+
+  private initializeChunk(chunk: TerrainChunk): void {
+    const candidates = this.planner.generateCandidates(chunk.data);
+    const kindCounts = createKindCounts();
+    const lodMeshes = createLodMeshes();
+
+    for (const candidate of candidates) {
+      kindCounts[candidate.kind] += 1;
+      this.createMeshesForLods(candidate, lodMeshes);
+    }
+
+    this.chunkFoliage.set(this.getChunkKey(chunk.chunkX, chunk.chunkZ), {
+      lodMeshes,
+      center: chunk.center.clone(),
+      instanceCount: candidates.length,
+      kindCounts
+    });
+    this.totalInstanceCount += candidates.length;
+    this.totalKindCounts[TerrainFoliageKind.Tree] += kindCounts[TerrainFoliageKind.Tree];
+    this.totalKindCounts[TerrainFoliageKind.Bush] += kindCounts[TerrainFoliageKind.Bush];
+    this.totalKindCounts[TerrainFoliageKind.Rock] += kindCounts[TerrainFoliageKind.Rock];
+  }
+
+  private *initializeChunksCoroutine(
+    chunks: readonly TerrainChunk[],
+    abortSignal?: AbortSignal
+  ) {
+    for (const chunk of chunks) {
+      if (abortSignal?.aborted) {
+        return;
+      }
+      this.initializeChunk(chunk);
+      yield;
+    }
   }
 
   private createPrototypes(): Record<TerrainFoliageKind, Record<FoliageLODLevel, Mesh>> {

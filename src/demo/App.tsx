@@ -9,9 +9,14 @@ import type {
   WorldTabState,
 } from "./demoSnapshots";
 import { useDemoBridge } from "./useDemoBridge";
+import "./app.css";
 
 interface TerrainPresetOption {
   readonly name: string;
+}
+
+function cx(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
 }
 
 export function App() {
@@ -168,11 +173,7 @@ export function App() {
 }
 
 function HudOverlay({ text }: { readonly text: string }) {
-  return (
-    <div style={hudOverlayStyle}>
-      {text}
-    </div>
-  );
+  return <div className="editor-hud">{text}</div>;
 }
 
 function LeftPanel({
@@ -225,17 +226,14 @@ function LeftPanel({
   readonly worldTabState: WorldTabState | null;
 }) {
   return (
-    <div>
-      <div style={headingStyle}>Terrain Tuning</div>
-      <div style={tabBarStyle}>
+    <div className="editor-panel-content">
+      <div className="editor-heading">Terrain Tuning</div>
+      <div className="editor-tab-bar">
         {panelTabs.map(([tab, label]) => (
           <button
+            className={cx("editor-tab", activeTab === tab && "is-active")}
             key={tab}
             onClick={() => onPanelTabChange(tab)}
-            style={{
-              ...tabButtonStyle,
-              background: activeTab === tab ? "rgba(56, 93, 123, 0.95)" : "rgba(18, 29, 39, 0.95)"
-            }}
             type="button"
           >
             {label}
@@ -292,11 +290,12 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
   };
 
   return (
-    <div>
-      <div style={headingStyle}>World Features</div>
-      <div style={sectionLabelStyle}>Build</div>
-      <label style={checkboxRowStyle}>
+    <div className="editor-panel-content">
+      <div className="editor-heading">World Features</div>
+      <div className="editor-section-label">Build</div>
+      <label className="editor-checkbox-row">
         <input
+          className="editor-checkbox-input"
           checked={state.features.poi}
           onChange={(event) =>
             update((current) => ({
@@ -309,10 +308,12 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
           }
           type="checkbox"
         />
+        <span className="editor-checkbox-box" />
         <span>POI</span>
       </label>
-      <label style={checkboxRowStyle}>
+      <label className="editor-checkbox-row">
         <input
+          className="editor-checkbox-input"
           checked={state.features.roads}
           disabled={!state.features.poi}
           onChange={(event) =>
@@ -326,47 +327,59 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
           }
           type="checkbox"
         />
+        <span className="editor-checkbox-box" />
         <span>Build Roads</span>
       </label>
       <FeatureBuildStatus text={statusText} />
-      <button onClick={() => void onApplyFeatures()} style={{ ...buttonStyle, marginTop: "8px" }} type="button">
+      <button
+        className="editor-button"
+        onClick={() => void onApplyFeatures()}
+        style={topMarginStyle}
+        type="button"
+      >
         Apply Features
       </button>
 
       {state.features.poi ? (
         <>
-          <div style={dividerStyle} />
-          <div style={sectionLabelStyle}>POI Debug</div>
-          <label style={checkboxRowStyle}>
+          <div className="editor-divider" />
+          <div className="editor-section-label">POI Debug</div>
+          <label className="editor-checkbox-row">
             <input
+              className="editor-checkbox-input"
               checked={state.hidePoiMarkerMeshes}
               onChange={(event) =>
                 update((current) => ({ ...current, hidePoiMarkerMeshes: event.target.checked }))
               }
               type="checkbox"
             />
+            <span className="editor-checkbox-box" />
             <span>Hide Marker Meshes</span>
           </label>
-          <label style={checkboxRowStyle}>
+          <label className="editor-checkbox-row">
             <input
+              className="editor-checkbox-input"
               checked={state.hidePoiLabels}
               onChange={(event) => update((current) => ({ ...current, hidePoiLabels: event.target.checked }))}
               type="checkbox"
             />
+            <span className="editor-checkbox-box" />
             <span>Hide POI Labels</span>
           </label>
-          <label style={checkboxRowStyle}>
+          <label className="editor-checkbox-row">
             <input
+              className="editor-checkbox-input"
               checked={state.showPoiFootprints}
               onChange={(event) =>
                 update((current) => ({ ...current, showPoiFootprints: event.target.checked }))
               }
               type="checkbox"
             />
+            <span className="editor-checkbox-box" />
             <span>Show Footprints</span>
           </label>
-          <div style={infoCardStyle}>
-            <div style={{ color: "#9cb3c3", marginBottom: "6px" }}>POI Debug</div>
+          <div className="editor-card">
+            <div className="editor-label-muted" style={bottomSpacingStyle}>POI Debug</div>
             <DebugToggle
               checked={state.poiDebug.showScores}
               label="Show Scores"
@@ -436,7 +449,7 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
                 }))
               }
             />
-            <div style={dividerStyle} />
+            <div className="editor-divider" />
             <DebugToggle
               checked={state.poiDebug.mineResources.coal}
               label="Coal Mines"
@@ -477,7 +490,7 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
               }
             />
           </div>
-          <div style={infoCardStyle}>
+          <div className="editor-status editor-code">
             {`POI ${state.poiStats.total}: V ${state.poiStats.villages} | O ${state.poiStats.outposts} | M ${state.poiStats.mines}\nMeshes ${state.poiMeshStats.enabled}/${state.poiMeshStats.total}`}
           </div>
         </>
@@ -496,15 +509,21 @@ function DebugToggle({
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <label style={checkboxRowStyle}>
-      <input checked={checked} onChange={(event) => onChange(event.target.checked)} type="checkbox" />
+    <label className="editor-toggle-row">
+      <input
+        checked={checked}
+        className="editor-toggle-input"
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span className="editor-toggle-track" />
       <span>{label}</span>
     </label>
   );
 }
 
 function FeatureBuildStatus({ text }: { readonly text: string }) {
-  return <div style={{ ...infoCardStyle, marginTop: "8px", whiteSpace: "pre-wrap" }}>{text}</div>;
+  return <div className="editor-status" style={topMarginStyle}>{text}</div>;
 }
 
 function RuntimeTab({
@@ -519,8 +538,8 @@ function RuntimeTab({
   };
 
   return (
-    <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
-      <div style={sectionLabelStyle}>Runtime</div>
+    <div style={tabContentStyle}>
+      <div className="editor-section-label">Runtime</div>
       <SliderField label="Water" max={32} min={-24} onChange={(value) => update((current) => ({ ...current, waterLevel: value }))} step={1} value={state.waterLevel} />
       <SliderField label="Water Opacity" max={1} min={0.1} onChange={(value) => update((current) => ({ ...current, water: { ...current.water, opacity: value } }))} step={0.01} value={state.water.opacity} />
       <SliderField label="Shore Fade" max={32} min={1} onChange={(value) => update((current) => ({ ...current, water: { ...current.water, shoreFadeDistance: value } }))} step={0.5} value={state.water.shoreFadeDistance} />
@@ -547,8 +566,8 @@ function RuntimeTab({
       />
       <ColorField label="Shallow Color" onChange={(value) => update((current) => ({ ...current, water: { ...current.water, shallowColor: value } }))} value={state.water.shallowColor} />
       <ColorField label="Deep Color" onChange={(value) => update((current) => ({ ...current, water: { ...current.water, deepColor: value } }))} value={state.water.deepColor} />
-      <div style={dividerStyle} />
-      <div style={sectionLabelStyle}>Camera Radius</div>
+      <div className="editor-divider" />
+      <div className="editor-section-label">Camera Radius</div>
       <CheckboxField
         checked={state.buildFoliage}
         label="Build Foliage"
@@ -634,8 +653,8 @@ function MaterialTab({
   };
 
   return (
-    <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
-      <div style={sectionLabelStyle}>Material Blend</div>
+    <div style={tabContentStyle}>
+      <div className="editor-section-label">Material Blend</div>
       <CheckboxField
         checked={state.useGeneratedTextures}
         label="Use Generated Textures"
@@ -811,19 +830,19 @@ function WorldTab({
   };
 
   return (
-    <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
-      <div style={sectionLabelStyle}>Regenerate</div>
-      <label style={{ display: "grid", gap: "4px" }}>
-        <div>Seed</div>
+    <div style={tabContentStyle}>
+      <div className="editor-section-label">Regenerate</div>
+      <label className="editor-field-group">
+        <div className="editor-field-label">Seed</div>
         <input
+          className="editor-input"
           onChange={(event) => update((current) => ({ ...current, seed: event.target.value }))}
-          style={fieldStyle}
           type="text"
           value={state.seed}
         />
       </label>
-      <div style={dividerStyle} />
-      <div style={sectionLabelStyle}>World Size</div>
+      <div className="editor-divider" />
+      <div className="editor-section-label">World Size</div>
       <SliderField
         label="Chunks / Axis"
         max={16}
@@ -852,8 +871,8 @@ function WorldTab({
         step={16}
         value={state.chunkSize}
       />
-      <div style={infoCardStyle}>{`World Size: ${state.worldSize}`}</div>
-      <button onClick={onRetune} style={buttonStyle} type="button">
+      <div className="editor-status editor-code">{`World Size: ${state.worldSize}`}</div>
+      <button className="editor-button" onClick={onRetune} type="button">
         Retune For World Size
       </button>
       <SliderField label="Base Height" max={32} min={-64} onChange={(value) => update((current) => ({ ...current, baseHeight: value, maxHeight: Math.max(current.maxHeight, value + 40) }))} step={1} value={state.baseHeight} />
@@ -867,8 +886,8 @@ function WorldTab({
       <SliderField label="Hill Freq" max={0.015} min={0.002} onChange={(value) => update((current) => ({ ...current, shape: { ...current.shape, hillFrequency: value } }))} step={0.0005} value={state.shape.hillFrequency} />
       <SliderField label="Detail Amp" max={18} min={0} onChange={(value) => update((current) => ({ ...current, shape: { ...current.shape, detailAmplitude: value } }))} step={0.5} value={state.shape.detailAmplitude} />
       <SliderField label="Detail Freq" max={0.08} min={0.01} onChange={(value) => update((current) => ({ ...current, shape: { ...current.shape, detailFrequency: value } }))} step={0.001} value={state.shape.detailFrequency} />
-      <div style={dividerStyle} />
-      <div style={sectionLabelStyle}>Erosion</div>
+      <div className="editor-divider" />
+      <div className="editor-section-label">Erosion</div>
       <CheckboxField
         checked={state.erosion.enabled}
         label="Enable Erosion"
@@ -878,8 +897,8 @@ function WorldTab({
       <SliderField label="Iterations" max={48} min={0} onChange={(value) => update((current) => ({ ...current, erosion: { ...current.erosion, iterations: value } }))} step={1} value={state.erosion.iterations} />
       <SliderField label="Talus Height" max={4} min={0.25} onChange={(value) => update((current) => ({ ...current, erosion: { ...current.erosion, talusHeight: value } }))} step={0.05} value={state.erosion.talusHeight} />
       <SliderField label="Smoothing" max={0.45} min={0.02} onChange={(value) => update((current) => ({ ...current, erosion: { ...current.erosion, smoothing: value } }))} step={0.01} value={state.erosion.smoothing} />
-      <div style={dividerStyle} />
-      <div style={sectionLabelStyle}>Rivers</div>
+      <div className="editor-divider" />
+      <div className="editor-section-label">Rivers</div>
       <CheckboxField
         checked={state.rivers.enabled}
         label="Enable Rivers"
@@ -893,16 +912,16 @@ function WorldTab({
       <SliderField label="Max Depth" max={14} min={1} onChange={(value) => update((current) => ({ ...current, rivers: { ...current.rivers, maxDepth: Math.max(value, current.rivers.depth) } }))} step={0.25} value={state.rivers.maxDepth} />
       <SliderField label="Min Slope" max={0.12} min={0} onChange={(value) => update((current) => ({ ...current, rivers: { ...current.rivers, minSlope: value } }))} step={0.002} value={state.rivers.minSlope} />
       <SliderField label="Min Elevation" max={32} min={0} onChange={(value) => update((current) => ({ ...current, rivers: { ...current.rivers, minElevation: value } }))} step={1} value={state.rivers.minElevation} />
-      <div style={dividerStyle} />
-      <div style={sectionLabelStyle}>POI</div>
+      <div className="editor-divider" />
+      <div className="editor-section-label">POI</div>
       <SliderField label="POI Density" max={3} min={0.35} onChange={(value) => update((current) => ({ ...current, poi: { ...current.poi, density: value } }))} step={0.05} value={state.poi.density} />
       <SliderField label="POI Spacing" max={1.8} min={0.7} onChange={(value) => update((current) => ({ ...current, poi: { ...current.poi, spacing: value } }))} step={0.05} value={state.poi.spacing} />
-      <div style={dividerStyle} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-        <button onClick={() => void onRebuildTerrain()} style={buttonStyle} type="button">
+      <div className="editor-divider" />
+      <div className="editor-row-grid">
+        <button className="editor-button" onClick={() => void onRebuildTerrain()} type="button">
           Rebuild Terrain
         </button>
-        <button onClick={onResetDraft} style={buttonStyle} type="button">
+        <button className="editor-button is-danger" onClick={onResetDraft} type="button">
           Reset Draft
         </button>
       </div>
@@ -926,9 +945,20 @@ function SliderField({
   readonly value: number;
 }) {
   return (
-    <label style={{ display: "grid", gap: "4px" }}>
-      <div>{`${label}: ${formatValue(value, step)}`}</div>
-      <input max={String(max)} min={String(min)} onChange={(event) => onChange(Number(event.target.value))} step={String(step)} style={{ width: "100%" }} type="range" value={String(value)} />
+    <label className="editor-range-wrap">
+      <div className="editor-range-label">
+        <span>{label}</span>
+        <span className="editor-range-value">{formatValue(value, step)}</span>
+      </div>
+      <input
+        className="editor-range"
+        max={String(max)}
+        min={String(min)}
+        onChange={(event) => onChange(Number(event.target.value))}
+        step={String(step)}
+        type="range"
+        value={String(value)}
+      />
     </label>
   );
 }
@@ -943,8 +973,14 @@ function CheckboxField({
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <label style={checkboxRowStyle}>
-      <input checked={checked} onChange={(event) => onChange(event.target.checked)} type="checkbox" />
+    <label className="editor-checkbox-row">
+      <input
+        checked={checked}
+        className="editor-checkbox-input"
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span className="editor-checkbox-box" />
       <span>{label}</span>
     </label>
   );
@@ -962,9 +998,9 @@ function SelectField({
   readonly value: string;
 }) {
   return (
-    <label style={{ display: "grid", gap: "4px" }}>
-      <div>{label}</div>
-      <select onChange={(event) => onChange(event.target.value)} style={fieldStyle} value={value}>
+    <label className="editor-field-group">
+      <div className="editor-field-label">{label}</div>
+      <select className="editor-select" onChange={(event) => onChange(event.target.value)} value={value}>
         {options.map(([optionLabel, optionValue]) => (
           <option key={optionValue} value={optionValue}>
             {optionLabel}
@@ -985,9 +1021,14 @@ function ColorField({
   readonly value: string;
 }) {
   return (
-    <label style={{ display: "grid", gap: "4px" }}>
-      <div>{label}</div>
-      <input onChange={(event) => onChange(event.target.value)} style={{ ...fieldStyle, height: "32px", padding: "2px" }} type="color" value={value} />
+    <label className="editor-field-group">
+      <div className="editor-field-label">{label}</div>
+      <input
+        className="editor-input"
+        onChange={(event) => onChange(event.target.value)}
+        type="color"
+        value={value}
+      />
     </label>
   );
 }
@@ -1026,14 +1067,14 @@ function PresetsTab({
   selectedPresetName
 }: PresetsTabProps) {
   return (
-    <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
-      <div style={sectionLabelStyle}>Presets</div>
-      <label style={{ display: "grid", gap: "4px" }}>
-        <div style={{ color: "#9cb3c3" }}>Preset</div>
+    <div style={tabContentStyle}>
+      <div className="editor-section-label">Presets</div>
+      <label className="editor-field-group">
+        <div className="editor-label-muted">Preset</div>
         <select
+          className="editor-select"
           value={presetOptions.length === 0 ? "" : String(selectedPresetIndex)}
           onChange={(event) => onSelectPreset(Number(event.target.value))}
-          style={fieldStyle}
         >
           {presetOptions.map((preset, index) => (
             <option key={`${preset.name}-${index}`} value={index}>
@@ -1042,44 +1083,49 @@ function PresetsTab({
           ))}
         </select>
       </label>
-      <button type="button" onClick={() => void onApply()} style={buttonStyle}>
+      <button className="editor-button" type="button" onClick={() => void onApply()}>
         Apply Selected Preset
       </button>
-      <button type="button" onClick={onExport} style={buttonStyle} disabled={presetOptions.length === 0}>
+      <button
+        className="editor-button"
+        type="button"
+        onClick={onExport}
+        disabled={presetOptions.length === 0}
+      >
         Export {selectedPresetName || "Preset"}
       </button>
-      <label style={{ display: "grid", gap: "4px" }}>
-        <div style={{ color: "#9cb3c3" }}>Save Current As</div>
+      <label className="editor-field-group">
+        <div className="editor-label-muted">Save Current As</div>
         <input
+          className="editor-input"
           type="text"
           value={presetName}
           onChange={(event) => onPresetNameChange(event.target.value)}
           placeholder="Preset name"
-          style={fieldStyle}
         />
       </label>
-      <button type="button" onClick={onSave} style={buttonStyle} disabled={!presetName.trim()}>
+      <button className="editor-button" type="button" onClick={onSave} disabled={!presetName.trim()}>
         Save Current Preset
       </button>
-      <label style={{ display: "grid", gap: "4px" }}>
-        <div style={{ color: "#9cb3c3" }}>Import Presets JSON</div>
+      <label className="editor-field-group">
+        <div className="editor-label-muted">Import Presets JSON</div>
         <textarea
+          className="editor-textarea editor-code"
           value={importText}
           onChange={(event) => onImportTextChange(event.target.value)}
           rows={6}
           placeholder='[{"name":"My Preset","config":{}}]'
-          style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }}
         />
       </label>
-      <button type="button" onClick={onImport} style={buttonStyle} disabled={!importText.trim()}>
+      <button className="editor-button" type="button" onClick={onImport} disabled={!importText.trim()}>
         Import Presets
       </button>
-      <div style={dividerStyle} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-        <button type="button" onClick={() => void onRebuildTerrain()} style={buttonStyle}>
+      <div className="editor-divider" />
+      <div className="editor-row-grid">
+        <button className="editor-button" type="button" onClick={() => void onRebuildTerrain()}>
           Rebuild Terrain
         </button>
-        <button type="button" onClick={onResetDraft} style={buttonStyle}>
+        <button className="editor-button is-danger" type="button" onClick={onResetDraft}>
           Reset Draft
         </button>
       </div>
@@ -1087,100 +1133,18 @@ function PresetsTab({
   );
 }
 
-const hudOverlayStyle = {
-  position: "fixed" as const,
-  top: "16px",
-  left: "16px",
-  padding: "10px 12px",
-  border: "1px solid rgba(255, 255, 255, 0.18)",
-  borderRadius: "10px",
-  background: "rgba(6, 10, 15, 0.72)",
-  color: "#f4edc9",
-  font: "12px/1.45 Consolas, 'Courier New', monospace",
-  zIndex: 10,
-  userSelect: "none" as const,
-  whiteSpace: "pre-wrap" as const
-};
-
-const headingStyle = {
-  fontSize: "14px",
-  fontWeight: 700
-};
-
-const tabBarStyle = {
+const tabContentStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, 1fr)",
-  gap: "6px",
-  marginTop: "10px",
-  width: "100%",
-  boxSizing: "border-box" as const
-};
-
-const tabButtonStyle = {
-  padding: "7px 6px",
-  borderRadius: "8px",
-  border: "1px solid rgba(255,255,255,0.16)",
-  color: "#f4edc9",
-  cursor: "pointer",
-  minWidth: "0",
-  maxWidth: "100%",
-  whiteSpace: "nowrap" as const,
-  overflow: "hidden",
-  textOverflow: "ellipsis"
-};
-
-const sectionLabelStyle = {
-  marginTop: "12px",
-  fontSize: "11px",
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.08em",
-  color: "#9cb3c3"
-};
-
-const checkboxRowStyle = {
-  display: "flex",
   gap: "8px",
-  alignItems: "center",
-  marginTop: "8px"
-};
-
-const dividerStyle = {
-  height: "1px",
-  marginTop: "12px",
-  background: "rgba(255,255,255,0.1)"
-};
-
-const infoCardStyle = {
   marginTop: "8px",
-  padding: "6px 8px",
-  borderRadius: "8px",
-  background: "rgba(14, 21, 29, 0.95)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  color: "#9cb3c3"
 };
 
-const fieldStyle = {
-  width: "100%",
-  maxWidth: "100%",
-  padding: "6px 8px",
-  boxSizing: "border-box" as const,
-  borderRadius: "8px",
-  border: "1px solid rgba(255,255,255,0.16)",
-  background: "rgba(14, 21, 29, 0.95)",
-  color: "#f4edc9"
+const topMarginStyle = {
+  marginTop: "8px",
 };
 
-const buttonStyle = {
-  padding: "8px 10px",
-  borderRadius: "8px",
-  border: "1px solid rgba(255,255,255,0.16)",
-  background: "rgba(18, 29, 39, 0.95)",
-  color: "#f4edc9",
-  cursor: "pointer",
-  width: "100%",
-  maxWidth: "100%",
-  minWidth: "0",
-  boxSizing: "border-box" as const
+const bottomSpacingStyle = {
+  marginBottom: "6px",
 };
 
 const debugViewOptions = [

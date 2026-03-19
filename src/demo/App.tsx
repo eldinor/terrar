@@ -126,7 +126,24 @@ export function App() {
   return (
     <>
       <div id="app" />
-      {snapshot.hudText ? <HudOverlay text={snapshot.hudText} /> : null}
+      {snapshot.headerActionsMount
+        ? createPortal(
+            <button
+              className="editor-button editor-button-header"
+              onClick={() => void handleRebuildTerrain()}
+              type="button"
+            >
+              Rebuild Terrain
+            </button>,
+            snapshot.headerActionsMount,
+          )
+        : null}
+      {snapshot.footerMount
+        ? createPortal(
+            <FooterStatus text={snapshot.hudText} />,
+            snapshot.footerMount,
+          )
+        : null}
       {snapshot.featurePanelMount && snapshot.featurePanelState
         ? createPortal(
             <FeaturePanel
@@ -172,8 +189,8 @@ export function App() {
   );
 }
 
-function HudOverlay({ text }: { readonly text: string }) {
-  return <div className="editor-hud">{text}</div>;
+function FooterStatus({ text }: { readonly text: string }) {
+  return <div className="editor-footer-status">{text}</div>;
 }
 
 function LeftPanel({

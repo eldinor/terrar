@@ -1,5 +1,10 @@
 import type { TerrainDemo } from "./createTerrainDemo";
-import { createFeaturePanelMount, createLeftPanelMount } from "./demoShell";
+import {
+  createFeaturePanelMount,
+  createFooterMount,
+  createHeaderActionsMount,
+  createLeftPanelMount,
+} from "./demoShell";
 import {
   buildPresetFromDraft,
   buildTerrainOverridesFromDraft,
@@ -35,6 +40,8 @@ import {
 
 interface DemoBridgeContext {
   readonly demo: TerrainDemo;
+  readonly headerActions: HTMLDivElement;
+  readonly footer: HTMLDivElement;
   readonly panel: HTMLDivElement;
   readonly featurePanel: HTMLDivElement;
 }
@@ -69,6 +76,8 @@ export interface DemoSnapshot {
   readonly featurePanelMount: HTMLElement | null;
   readonly featurePanelState: FeaturePanelState | null;
   readonly featureStatusText: string;
+  readonly footerMount: HTMLElement | null;
+  readonly headerActionsMount: HTMLElement | null;
   readonly hudText: string;
   readonly leftPanelMount: HTMLElement | null;
   readonly materialTabState: MaterialTabState | null;
@@ -108,6 +117,8 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   renderPresetOptions();
   renderPanel();
   renderFeaturePanel();
+  renderHeaderActions();
+  renderFooter();
   publishSnapshot();
 
   window.setInterval(() => {
@@ -472,6 +483,18 @@ function renderFeaturePanel(): void {
   renderFeaturePanelState();
 }
 
+function renderFooter(): void {
+  const current = requireContext();
+  current.footer.replaceChildren();
+  current.footer.appendChild(createFooterMount());
+}
+
+function renderHeaderActions(): void {
+  const current = requireContext();
+  current.headerActions.replaceChildren();
+  current.headerActions.appendChild(createHeaderActionsMount());
+}
+
 function updateFeatureBuildStatus(): void {
   renderFeatureStatus();
 }
@@ -606,6 +629,8 @@ function createSnapshot(): DemoSnapshot {
     featurePanelMount: document.getElementById("react-feature-panel"),
     featurePanelState: getFeaturePanelState(),
     featureStatusText: getFeatureBuildStatusText(),
+    footerMount: document.getElementById("react-footer-status"),
+    headerActionsMount: document.getElementById("react-header-actions"),
     hudText: getHudText(),
     leftPanelMount: document.getElementById("react-left-panel"),
     materialTabState: getMaterialTabState(),

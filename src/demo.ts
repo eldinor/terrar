@@ -4,11 +4,13 @@ import { createDemoShell } from "./demo/demoShell";
 
 export * from "./demo/demoBridge";
 
-const { canvas, leftPanel, featurePanel } = createDemoShell();
+const { canvas, headerActions, footer, leftPanel, featurePanel } = createDemoShell();
 const demo = createTerrainDemo(canvas);
 
 initializeDemoBridge({
   demo,
+  headerActions,
+  footer,
   panel: leftPanel,
   featurePanel,
 });

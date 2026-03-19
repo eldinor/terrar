@@ -6,6 +6,8 @@ const EMPTY_SNAPSHOT: DemoSnapshot = {
   featurePanelMount: null,
   featurePanelState: null,
   featureStatusText: "",
+  footerMount: null,
+  headerActionsMount: null,
   hudText: "",
   leftPanelMount: null,
   materialTabState: null,

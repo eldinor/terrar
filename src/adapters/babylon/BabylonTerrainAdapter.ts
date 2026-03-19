@@ -24,6 +24,14 @@ export function renderBuiltTerrain(
   return new BabylonTerrainSystemAdapter(scene, terrain, options);
 }
 
+export function renderTerrainAsset(
+  scene: Scene,
+  terrainAsset: BuiltTerrain,
+  options: BabylonTerrainAdapterOptions = {}
+): BabylonTerrainAdapter {
+  return renderBuiltTerrain(scene, terrainAsset, options);
+}
+
 class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
   readonly scene: Scene;
   readonly terrain: BuiltTerrain;

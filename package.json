@@ -3,12 +3,43 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
+    },
+    "./builder": {
+      "types": "./dist/builder.d.ts",
+      "import": "./dist/builder.js"
+    },
+    "./builder/node": {
+      "types": "./dist/builder-node.d.ts",
+      "import": "./dist/builder-node.js"
+    },
+    "./builder/cli": {
+      "types": "./dist/builder/terrainExportCli.d.ts",
+      "import": "./dist/builder/terrainExportCli.js"
+    },
+    "./babylon": {
+      "types": "./dist/babylon.d.ts",
+      "import": "./dist/babylon.js"
+    },
+    "./demo": {
+      "types": "./dist/demo-api.d.ts",
+      "import": "./dist/demo-api.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "export:terrain": "node dist/builder-cli.js"
   },
   "dependencies": {
     "@babylonjs/core": "8.54.3",

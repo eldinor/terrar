@@ -58,3 +58,14 @@ export interface BuiltTerrain {
   readonly roads: readonly BuiltTerrainRoad[];
   readonly packedSnapshot: BuiltTerrainSnapshot;
 }
+
+// Public alias for the canonical full runtime terrain asset.
+export type TerrainAsset = BuiltTerrain;
+export type TerrainAssetConfig = BuiltTerrainConfig;
+export type TerrainAssetSnapshot = BuiltTerrainSnapshot;
+export type TerrainAssetSnapshotField = BuiltTerrainSnapshotField;
+export type TerrainAssetSnapshotFields = BuiltTerrainSnapshotFields;
+export type TerrainAssetPoint = BuiltTerrainPoint;
+export type TerrainAssetPoi = BuiltTerrainPoi;
+export type TerrainAssetRoad = BuiltTerrainRoad;
+export type TerrainAssetPoiKind = BuiltTerrainPoiKind;

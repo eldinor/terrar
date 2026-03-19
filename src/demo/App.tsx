@@ -1,300 +1,38 @@
 import { BabylonTerrainDebugViewMode as TerrainDebugViewMode } from "../adapters/babylon";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import type {
+  FeaturePanelState,
+  MaterialTabState,
+  PanelTab,
+  RuntimeTabState,
+  WorldTabState,
+} from "./demoSnapshots";
+import { useDemoBridge } from "./useDemoBridge";
 
 interface TerrainPresetOption {
   readonly name: string;
 }
 
-interface FeaturePanelState {
-  readonly features: {
-    readonly poi: boolean;
-    readonly roads: boolean;
-  };
-  readonly hidePoiMarkerMeshes: boolean;
-  readonly hidePoiLabels: boolean;
-  readonly showPoiFootprints: boolean;
-  readonly poiDebug: {
-    readonly showScores: boolean;
-    readonly showRadii: boolean;
-    readonly showTags: boolean;
-    readonly kinds: Record<"village" | "outpost" | "mine", boolean>;
-    readonly mineResources: Record<"coal" | "iron" | "copper", boolean>;
-  };
-  readonly poiStats: {
-    readonly total: number;
-    readonly villages: number;
-    readonly outposts: number;
-    readonly mines: number;
-  };
-  readonly poiMeshStats: {
-    readonly enabled: number;
-    readonly total: number;
-  };
-}
-
-interface RuntimeTabState {
-  readonly waterLevel: number;
-  readonly water: {
-    readonly opacity: number;
-    readonly shoreFadeDistance: number;
-    readonly waveScaleX: number;
-    readonly waveScaleZ: number;
-    readonly waveSpeedX: number;
-    readonly waveSpeedZ: number;
-    readonly riverDischargeStrength: number;
-    readonly riverMeshThreshold: number;
-    readonly riverMeshMinWidth: number;
-    readonly lakeMeshThreshold: number;
-    readonly inlandMeshResolution: number;
-    readonly inlandSmoothingPasses: number;
-    readonly debugView: number;
-    readonly shallowColor: string;
-    readonly deepColor: string;
-  };
-  readonly buildFoliage: boolean;
-  readonly showFoliage: boolean;
-  readonly collisionRadius: number;
-  readonly foliageRadius: number;
-  readonly lodDistances: readonly [number, number, number];
-  readonly debugViewMode: TerrainDebugViewMode;
-}
-
-interface MaterialTabState {
-  readonly useGeneratedTextures: boolean;
-  readonly materialThresholds: {
-    readonly rockSlopeStart: number;
-    readonly rockSlopeFull: number;
-    readonly grassMaxSlope: number;
-    readonly snowStartHeight: number;
-    readonly snowFullHeight: number;
-    readonly dirtLowHeight: number;
-    readonly dirtHighHeight: number;
-  };
-  readonly materialScales: {
-    readonly grassScale: number;
-    readonly dirtScale: number;
-    readonly sandScale: number;
-    readonly rockScale: number;
-    readonly snowScale: number;
-    readonly macroScale: number;
-    readonly antiTileStrength: number;
-  };
-  readonly blendSharpness: number;
-  readonly shorelineStartOffset: number;
-  readonly shorelineEndOffset: number;
-  readonly sedimentStrength: number;
-  readonly sedimentSandBias: number;
-  readonly smallRiverTintStrength: number;
-  readonly smallRiverTintBrightness: number;
-  readonly smallRiverTintSaturation: number;
-  readonly baseHeight: number;
-  readonly maxHeight: number;
-}
-
-interface WorldTabState {
-  readonly seed: string;
-  readonly worldSize: number;
-  readonly chunksPerAxis: number;
-  readonly chunkSize: number;
-  readonly baseHeight: number;
-  readonly maxHeight: number;
-  readonly erosion: {
-    readonly enabled: boolean;
-    readonly resolution: number;
-    readonly iterations: number;
-    readonly talusHeight: number;
-    readonly smoothing: number;
-  };
-  readonly poi: {
-    readonly density: number;
-    readonly spacing: number;
-  };
-  readonly rivers: {
-    readonly enabled: boolean;
-    readonly resolution: number;
-    readonly flowThreshold: number;
-    readonly bankStrength: number;
-    readonly lakeThreshold: number;
-    readonly depth: number;
-    readonly maxDepth: number;
-    readonly minSlope: number;
-    readonly minElevation: number;
-  };
-  readonly shape: {
-    readonly continentAmplitude: number;
-    readonly continentFrequency: number;
-    readonly radialFalloffStrength: number;
-    readonly mountainAmplitude: number;
-    readonly mountainFrequency: number;
-    readonly hillAmplitude: number;
-    readonly hillFrequency: number;
-    readonly detailAmplitude: number;
-    readonly detailFrequency: number;
-  };
-}
-
-interface LegacyBridgeModule {
-  readonly LEGACY_FEATURE_PANEL_EVENT: string;
-  readonly LEGACY_FEATURE_STATUS_EVENT: string;
-  readonly LEGACY_HUD_EVENT: string;
-  readonly LEGACY_LEFT_PANEL_EVENT: string;
-  readonly LEGACY_MATERIAL_TAB_EVENT: string;
-  readonly LEGACY_PRESETS_EVENT: string;
-  readonly LEGACY_RUNTIME_TAB_EVENT: string;
-  readonly LEGACY_WORLD_TAB_EVENT: string;
-  getFeaturePanelState(): FeaturePanelState;
-  getFeatureBuildStatusText(): string;
-  getActivePanelTab(): PanelTab;
-  getLegacyHudText(): string;
-  getMaterialTabState(): MaterialTabState;
-  getPresetOptionsData(): TerrainPresetOption[];
-  getRuntimeTabState(): RuntimeTabState;
-  getWorldTabState(): WorldTabState;
-  applyPresetByIndex(index: number): Promise<void>;
-  saveCurrentPreset(name: string): void;
-  exportPresetByIndex(index: number): void;
-  importPresetText(serialized: string): void;
-  rebuildTerrainFromDraft(): Promise<void>;
-  resetDraftTerrainConfig(): void;
-  retuneWorldTabForWorldSize(): void;
-  setActivePanelTab(tab: PanelTab): void;
-  setFeaturePanelState(state: FeaturePanelState): void;
-  setMaterialTabState(state: MaterialTabState): void;
-  setRuntimeTabState(state: RuntimeTabState): void;
-  setWorldTabState(state: WorldTabState): void;
-}
-
-type PanelTab = "runtime" | "material" | "world" | "presets";
-
 export function App() {
-  const [bridge, setBridge] = useState<LegacyBridgeModule | null>(null);
-  const [hudText, setHudText] = useState("");
-  const [featureStatusText, setFeatureStatusText] = useState("");
-  const [featurePanelState, setFeaturePanelState] = useState<FeaturePanelState | null>(null);
-  const [activePanelTab, setActivePanelTab] = useState<PanelTab>("runtime");
-  const [materialTabState, setMaterialTabState] = useState<MaterialTabState | null>(null);
-  const [runtimeTabState, setRuntimeTabState] = useState<RuntimeTabState | null>(null);
-  const [worldTabState, setWorldTabState] = useState<WorldTabState | null>(null);
-  const [presetOptions, setPresetOptions] = useState<readonly TerrainPresetOption[]>([]);
+  const { bridge, snapshot } = useDemoBridge();
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
   const [presetName, setPresetName] = useState("");
   const [importText, setImportText] = useState("");
-  const [featurePanelMount, setFeaturePanelMount] = useState<HTMLElement | null>(null);
-  const [leftPanelMount, setLeftPanelMount] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    let cleanup: (() => void) | undefined;
-
-    void import("./legacyBootstrap").then((module) => {
-      if (cancelled) {
-        return;
+    setSelectedPresetIndex((currentIndex) => {
+      if (snapshot.presetOptions.length === 0) {
+        return 0;
       }
-
-      const loadedBridge = module as LegacyBridgeModule;
-      const syncMounts = () => {
-        setFeaturePanelMount(document.getElementById("react-feature-panel"));
-        setLeftPanelMount(document.getElementById("react-left-panel"));
-      };
-      const syncHud = (event?: Event) => {
-        setHudText(event ? (event as CustomEvent<string>).detail : loadedBridge.getLegacyHudText());
-        syncMounts();
-      };
-      const syncFeatureStatus = (event?: Event) => {
-        setFeatureStatusText(
-          event ? (event as CustomEvent<string>).detail : loadedBridge.getFeatureBuildStatusText(),
-        );
-        syncMounts();
-      };
-      const syncFeaturePanel = (event?: Event) => {
-        setFeaturePanelState(
-          event ? (event as CustomEvent<FeaturePanelState>).detail : loadedBridge.getFeaturePanelState(),
-        );
-        syncMounts();
-      };
-      const syncPresets = (event?: Event) => {
-        const nextOptions = event
-          ? (event as CustomEvent<readonly TerrainPresetOption[]>).detail
-          : loadedBridge.getPresetOptionsData();
-        setPresetOptions(nextOptions);
-        setSelectedPresetIndex((currentIndex) => {
-          if (nextOptions.length === 0) {
-            return 0;
-          }
-          return Math.min(currentIndex, nextOptions.length - 1);
-        });
-        syncMounts();
-      };
-      const syncRuntimeTab = (event?: Event) => {
-        setRuntimeTabState(
-          event ? (event as CustomEvent<RuntimeTabState>).detail : loadedBridge.getRuntimeTabState(),
-        );
-        syncMounts();
-      };
-      const syncMaterialTab = (event?: Event) => {
-        setMaterialTabState(
-          event ? (event as CustomEvent<MaterialTabState>).detail : loadedBridge.getMaterialTabState(),
-        );
-        syncMounts();
-      };
-      const syncWorldTab = (event?: Event) => {
-        setWorldTabState(
-          event ? (event as CustomEvent<WorldTabState>).detail : loadedBridge.getWorldTabState(),
-        );
-        syncMounts();
-      };
-      const syncLeftPanel = (event?: Event) => {
-        setActivePanelTab(event ? (event as CustomEvent<PanelTab>).detail : loadedBridge.getActivePanelTab());
-        syncMounts();
-      };
-
-      setBridge(loadedBridge);
-      syncHud();
-      syncFeatureStatus();
-      syncFeaturePanel();
-      syncMaterialTab();
-      syncRuntimeTab();
-      syncWorldTab();
-      syncLeftPanel();
-      syncPresets();
-
-      window.addEventListener(loadedBridge.LEGACY_HUD_EVENT, syncHud);
-      window.addEventListener(loadedBridge.LEGACY_FEATURE_STATUS_EVENT, syncFeatureStatus);
-      window.addEventListener(loadedBridge.LEGACY_FEATURE_PANEL_EVENT, syncFeaturePanel);
-      window.addEventListener(loadedBridge.LEGACY_LEFT_PANEL_EVENT, syncLeftPanel);
-      window.addEventListener(loadedBridge.LEGACY_MATERIAL_TAB_EVENT, syncMaterialTab);
-      window.addEventListener(loadedBridge.LEGACY_RUNTIME_TAB_EVENT, syncRuntimeTab);
-      window.addEventListener(loadedBridge.LEGACY_WORLD_TAB_EVENT, syncWorldTab);
-      window.addEventListener(loadedBridge.LEGACY_PRESETS_EVENT, syncPresets);
-
-      cleanup = () => {
-        window.removeEventListener(loadedBridge.LEGACY_HUD_EVENT, syncHud);
-        window.removeEventListener(loadedBridge.LEGACY_FEATURE_STATUS_EVENT, syncFeatureStatus);
-        window.removeEventListener(loadedBridge.LEGACY_FEATURE_PANEL_EVENT, syncFeaturePanel);
-        window.removeEventListener(loadedBridge.LEGACY_LEFT_PANEL_EVENT, syncLeftPanel);
-        window.removeEventListener(loadedBridge.LEGACY_MATERIAL_TAB_EVENT, syncMaterialTab);
-        window.removeEventListener(loadedBridge.LEGACY_RUNTIME_TAB_EVENT, syncRuntimeTab);
-        window.removeEventListener(loadedBridge.LEGACY_WORLD_TAB_EVENT, syncWorldTab);
-        window.removeEventListener(loadedBridge.LEGACY_PRESETS_EVENT, syncPresets);
-      };
+      return Math.min(currentIndex, snapshot.presetOptions.length - 1);
     });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
-    };
-  }, []);
+  }, [snapshot.presetOptions]);
 
   const selectedPresetName = useMemo(
-    () => presetOptions[selectedPresetIndex]?.name ?? "",
-    [presetOptions, selectedPresetIndex],
+    () => snapshot.presetOptions[selectedPresetIndex]?.name ?? "",
+    [snapshot.presetOptions, selectedPresetIndex],
   );
-
-  const refreshMounts = () => {
-    setFeaturePanelMount(document.getElementById("react-feature-panel"));
-    setLeftPanelMount(document.getElementById("react-left-panel"));
-  };
 
   const handleApplyPreset = async (): Promise<void> => {
     if (!bridge) {
@@ -302,7 +40,6 @@ export function App() {
     }
 
     await bridge.applyPresetByIndex(selectedPresetIndex);
-    refreshMounts();
   };
 
   const handleSavePreset = (): void => {
@@ -317,7 +54,6 @@ export function App() {
 
     bridge.saveCurrentPreset(nextName);
     setPresetName("");
-    refreshMounts();
   };
 
   const handleExportPreset = (): void => {
@@ -336,7 +72,6 @@ export function App() {
 
     bridge.importPresetText(serialized);
     setImportText("");
-    refreshMounts();
   };
 
   const handleRebuildTerrain = async (): Promise<void> => {
@@ -345,7 +80,6 @@ export function App() {
     }
 
     await bridge.rebuildTerrainFromDraft();
-    refreshMounts();
   };
 
   const handleResetDraft = (): void => {
@@ -354,31 +88,25 @@ export function App() {
     }
 
     bridge.resetDraftTerrainConfig();
-    refreshMounts();
   };
 
   const handleFeaturePanelChange = (nextState: FeaturePanelState): void => {
-    setFeaturePanelState(nextState);
     bridge?.setFeaturePanelState(nextState);
   };
 
   const handleRuntimeTabChange = (nextState: RuntimeTabState): void => {
-    setRuntimeTabState(nextState);
     bridge?.setRuntimeTabState(nextState);
   };
 
   const handleMaterialTabChange = (nextState: MaterialTabState): void => {
-    setMaterialTabState(nextState);
     bridge?.setMaterialTabState(nextState);
   };
 
   const handleWorldTabChange = (nextState: WorldTabState): void => {
-    setWorldTabState(nextState);
     bridge?.setWorldTabState(nextState);
   };
 
   const handlePanelTabChange = (tab: PanelTab): void => {
-    setActivePanelTab(tab);
     bridge?.setActivePanelTab(tab);
   };
 
@@ -388,29 +116,28 @@ export function App() {
     }
 
     bridge.retuneWorldTabForWorldSize();
-    refreshMounts();
   };
 
   return (
     <>
       <div id="app" />
-      {hudText ? <HudOverlay text={hudText} /> : null}
-      {featurePanelMount && featurePanelState
+      {snapshot.hudText ? <HudOverlay text={snapshot.hudText} /> : null}
+      {snapshot.featurePanelMount && snapshot.featurePanelState
         ? createPortal(
             <FeaturePanel
               onApplyFeatures={handleRebuildTerrain}
               onChange={handleFeaturePanelChange}
-              state={featurePanelState}
-              statusText={featureStatusText}
+              state={snapshot.featurePanelState}
+              statusText={snapshot.featureStatusText}
             />,
-            featurePanelMount,
+            snapshot.featurePanelMount,
           )
         : null}
-      {leftPanelMount
+      {snapshot.leftPanelMount
         ? createPortal(
             <LeftPanel
-              activeTab={activePanelTab}
-              materialTabState={materialTabState}
+              activeTab={snapshot.activePanelTab}
+              materialTabState={snapshot.materialTabState}
               onApply={handleApplyPreset}
               onExport={handleExportPreset}
               onImport={handleImportPresets}
@@ -426,14 +153,14 @@ export function App() {
               onSelectPreset={setSelectedPresetIndex}
               onWorldTabChange={handleWorldTabChange}
               presetName={presetName}
-              presetOptions={presetOptions}
+              presetOptions={snapshot.presetOptions}
               presetsImportText={importText}
-              runtimeTabState={runtimeTabState}
+              runtimeTabState={snapshot.runtimeTabState}
               selectedPresetIndex={selectedPresetIndex}
               selectedPresetName={selectedPresetName}
-              worldTabState={worldTabState}
+              worldTabState={snapshot.worldTabState}
             />,
-            leftPanelMount,
+            snapshot.leftPanelMount,
           )
         : null}
     </>

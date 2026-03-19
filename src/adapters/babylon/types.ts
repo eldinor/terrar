@@ -11,7 +11,11 @@ import type {
   BuiltTerrain,
   BuiltTerrainConfig,
   BuiltTerrainPoi,
-  BuiltTerrainRoad
+  BuiltTerrainRoad,
+  TerrainAsset,
+  TerrainAssetConfig,
+  TerrainAssetPoi,
+  TerrainAssetRoad
 } from "../../builder";
 import type {
   TerrainDebugViewMode as BabylonTerrainDebugViewMode,
@@ -127,3 +131,8 @@ export interface BabylonTerrainAdapter {
   getPendingChunkMeshCount(): number;
   isApplyingChunkMeshes(): boolean;
 }
+
+export type BabylonTerrainAsset = TerrainAsset;
+export type BabylonTerrainAssetConfig = TerrainAssetConfig;
+export type BabylonTerrainAssetPoi = TerrainAssetPoi;
+export type BabylonTerrainAssetRoad = TerrainAssetRoad;

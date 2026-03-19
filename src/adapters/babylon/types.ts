@@ -1,32 +1,74 @@
 import type { Scene } from "@babylonjs/core/scene";
 import type { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import type { TerrainPoi } from "../../terrain/TerrainPoiPlanner";
-import type { TerrainRoad } from "../../terrain/TerrainRoadPlanner";
+import type { TerrainChunkBuildCoordinator } from "../../terrain/TerrainChunkBuildCoordinator";
 import type {
-  TerrainDebugViewMode,
-  TerrainLayerThresholds,
-  TerrainMaterialConfig,
-  TerrainTextureOptions
-} from "../../terrain/materials";
-import type { TerrainWaterConfig } from "../../terrain/TerrainWaterSystem";
+  TerrainMineResource,
+  TerrainPoiKind
+} from "../../terrain/TerrainPoiPlanner";
 import type { TerrainChunkBuildProfile } from "../../terrain/TerrainChunkMeshRuntime";
-import type {
-  TerrainSystem,
-  TerrainSystemBuildOptions
-} from "../../terrain/TerrainSystem";
-import type { TerrainConfig } from "../../terrain/TerrainConfig";
 import type { TerrainFoliageStats } from "../../terrain/TerrainFoliageSystem";
 import type {
-  TerrainPoiDebugConfig,
-  TerrainPoiMeshStats,
-  TerrainPoiStats
-} from "../../terrain/TerrainPoiSystem";
-import type { TerrainRoadStats } from "../../terrain/TerrainRoadSystem";
-import type { BuiltTerrain } from "../../builder";
+  BuiltTerrain,
+  BuiltTerrainConfig,
+  BuiltTerrainPoi,
+  BuiltTerrainRoad
+} from "../../builder";
+import type {
+  TerrainDebugViewMode as BabylonTerrainDebugViewMode,
+  TerrainLayerThresholds as BabylonTerrainLayerThresholds,
+  TerrainMaterialConfig as BabylonTerrainMaterialConfig,
+  TerrainTextureOptions as BabylonTerrainTextureOptions
+} from "../../terrain/materials";
+import type { TerrainWaterConfig as BabylonTerrainWaterConfig } from "../../terrain/TerrainWaterSystem";
+
+export type {
+  BabylonTerrainDebugViewMode,
+  BabylonTerrainLayerThresholds,
+  BabylonTerrainMaterialConfig,
+  BabylonTerrainTextureOptions,
+  BabylonTerrainWaterConfig
+};
+
+export interface BabylonTerrainBuildProgress {
+  readonly completedChunks: number;
+  readonly totalChunks: number;
+}
+
+export interface BabylonTerrainBuildOptions {
+  readonly chunkBuildCoordinator?: TerrainChunkBuildCoordinator | null;
+  readonly chunkBuildVersion?: number;
+  readonly initialCameraPosition?: Vector3 | null;
+  readonly onChunkBuildProgress?: (progress: BabylonTerrainBuildProgress) => void;
+}
+
+export interface BabylonTerrainPoiStats {
+  readonly total: number;
+  readonly villages: number;
+  readonly outposts: number;
+  readonly mines: number;
+}
+
+export interface BabylonTerrainPoiMeshStats {
+  readonly total: number;
+  readonly enabled: number;
+}
+
+export interface BabylonTerrainPoiDebugConfig {
+  readonly showScores: boolean;
+  readonly showRadii: boolean;
+  readonly showTags: boolean;
+  readonly kinds: Readonly<Record<TerrainPoiKind, boolean>>;
+  readonly mineResources: Readonly<Record<TerrainMineResource, boolean>>;
+}
+
+export interface BabylonTerrainRoadStats {
+  readonly totalRoads: number;
+  readonly totalPoints: number;
+}
 
 export interface BabylonTerrainAdapterOptions {
-  readonly textureOptions?: TerrainTextureOptions;
-  readonly buildOptions?: TerrainSystemBuildOptions;
+  readonly textureOptions?: BabylonTerrainTextureOptions;
+  readonly buildOptions?: BabylonTerrainBuildOptions;
 }
 
 export interface BabylonTerrainAdapter {
@@ -43,8 +85,8 @@ export interface BabylonTerrainAdapter {
   getWireframe(): boolean;
   setWaterLevel(level: number): void;
   getWaterLevel(): number;
-  setWaterConfig(config: TerrainWaterConfig): void;
-  getWaterConfig(): TerrainWaterConfig;
+  setWaterConfig(config: BabylonTerrainWaterConfig): void;
+  getWaterConfig(): BabylonTerrainWaterConfig;
   setCollisionRadius(radius: number): void;
   getCollisionRadius(): number;
   setFoliageRadius(radius: number): void;
@@ -63,26 +105,25 @@ export interface BabylonTerrainAdapter {
   getShowRoads(): boolean;
   setLodDistances(distances: readonly [number, number, number]): void;
   getLodDistances(): readonly [number, number, number];
-  getConfig(): TerrainConfig;
-  getTextureOptions(): Required<TerrainTextureOptions>;
+  getConfig(): BuiltTerrainConfig;
+  getTextureOptions(): Required<BabylonTerrainTextureOptions>;
   getFoliageStats(): TerrainFoliageStats;
-  getPoiSites(): readonly TerrainPoi[];
-  getPoiStats(): TerrainPoiStats;
-  getPoiMeshStats(): TerrainPoiMeshStats;
-  setPoiDebugConfig(config: TerrainPoiDebugConfig): void;
-  getPoiDebugConfig(): TerrainPoiDebugConfig;
-  getRoads(): readonly TerrainRoad[];
-  getRoadStats(): TerrainRoadStats;
-  setDebugViewMode(mode: TerrainDebugViewMode): void;
-  getDebugViewMode(): TerrainDebugViewMode;
-  setTerrainMaterialConfig(config: TerrainMaterialConfig): void;
-  getTerrainMaterialConfig(): TerrainMaterialConfig;
-  setTerrainMaterialThresholds(thresholds: TerrainLayerThresholds): void;
-  getTerrainMaterialThresholds(): TerrainLayerThresholds;
+  getPoiSites(): readonly BuiltTerrainPoi[];
+  getPoiStats(): BabylonTerrainPoiStats;
+  getPoiMeshStats(): BabylonTerrainPoiMeshStats;
+  setPoiDebugConfig(config: BabylonTerrainPoiDebugConfig): void;
+  getPoiDebugConfig(): BabylonTerrainPoiDebugConfig;
+  getRoads(): readonly BuiltTerrainRoad[];
+  getRoadStats(): BabylonTerrainRoadStats;
+  setDebugViewMode(mode: BabylonTerrainDebugViewMode): void;
+  getDebugViewMode(): BabylonTerrainDebugViewMode;
+  setTerrainMaterialConfig(config: BabylonTerrainMaterialConfig): void;
+  getTerrainMaterialConfig(): BabylonTerrainMaterialConfig;
+  setTerrainMaterialThresholds(thresholds: BabylonTerrainLayerThresholds): void;
+  getTerrainMaterialThresholds(): BabylonTerrainLayerThresholds;
   getChunkBuildProfile(): TerrainChunkBuildProfile;
   getChunkCount(): number;
   getLoadedChunkMeshCount(): number;
   getPendingChunkMeshCount(): number;
   isApplyingChunkMeshes(): boolean;
-  getTerrainSystem(): TerrainSystem;
 }

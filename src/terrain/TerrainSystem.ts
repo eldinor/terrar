@@ -18,16 +18,16 @@ import { packTerrainSnapshot, unpackTerrainSnapshot } from "./TerrainSnapshotLay
 import { TerrainFoliageCandidate } from "./TerrainFoliagePlanner";
 import { TerrainFoliageRuntime } from "./TerrainFoliageRuntime";
 import { TerrainFoliageStats } from "./TerrainFoliageSystem";
-import { TerrainDebugOverlayRuntime } from "./TerrainDebugOverlayRuntime";
 import { TerrainFeatureRuntime } from "./TerrainFeatureRuntime";
 import { TerrainChunkVisibilityRuntime } from "./TerrainChunkVisibilityRuntime";
 import { TerrainLODController } from "./TerrainLODController";
 import { TerrainPoi } from "./TerrainPoiPlanner";
 import {
+  TerrainDebugOverlayController,
   TerrainPoiDebugConfig,
   TerrainPoiMeshStats,
   TerrainPoiStats
-} from "./TerrainPoiSystem";
+} from "./TerrainPresentation";
 import { TerrainRoad } from "./TerrainRoadPlanner";
 import { TerrainRoadStats } from "./TerrainRoadSystem";
 import { TerrainSurfaceRuntime } from "./TerrainSurfaceRuntime";
@@ -52,7 +52,7 @@ export class TerrainSystem {
   private featureRuntime: TerrainFeatureRuntime;
   private surfaceRuntime: TerrainSurfaceRuntime;
   private visibilityRuntime: TerrainChunkVisibilityRuntime | null = null;
-  private debugOverlayRuntime: TerrainDebugOverlayRuntime | null = null;
+  private debugOverlayRuntime: TerrainDebugOverlayController | null = null;
   private lodController: TerrainLODController;
   private readonly chunks: TerrainChunk[] = [];
   private readonly chunkGrid: TerrainChunk[][] = [];
@@ -89,7 +89,8 @@ export class TerrainSystem {
       this.scene,
       this.config,
       this.generator,
-      this.prebuiltWorld
+      this.prebuiltWorld,
+      this.buildOptions.presentation
     );
     this.surfaceRuntime = new TerrainSurfaceRuntime(
       this.scene,
@@ -143,11 +144,12 @@ export class TerrainSystem {
       this.chunkGrid,
       this.lodController
     );
-    this.debugOverlayRuntime = new TerrainDebugOverlayRuntime(
-      this.scene,
-      this.chunks,
-      this.config
-    );
+    this.debugOverlayRuntime =
+      this.buildOptions.presentation?.createDebugOverlayController?.(
+        this.scene,
+        this.chunks,
+        this.config
+      ) ?? null;
     this.foliageRuntime.initialize(this.chunks);
     this.chunkMeshRuntime = new TerrainChunkMeshRuntime(
       this.scene,
@@ -436,4 +438,5 @@ export interface TerrainSystemBuildOptions {
   readonly chunkBuildVersion?: number;
   readonly initialCameraPosition?: Vector3 | null;
   readonly onChunkBuildProgress?: (progress: TerrainChunkBuildProgress) => void;
+  readonly presentation?: import("./TerrainPresentation").TerrainPresentationFactories;
 }

@@ -1,119 +1,127 @@
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { Scene } from "@babylonjs/core/scene";
+import {
+  BuiltTerrain,
+  BuiltTerrainPoi,
+  BuiltTerrainRoad
+} from "../builder";
 import { ProceduralGenerator } from "./ProceduralGenerator";
 import { TerrainConfig } from "./TerrainConfig";
-import { TerrainPoi, TerrainPoiPlanner } from "./TerrainPoiPlanner";
+import { TerrainPoi, TerrainPoiKind, TerrainPoiPlanner } from "./TerrainPoiPlanner";
 import {
-  DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
   TerrainPoiDebugConfig,
   TerrainPoiMeshStats,
+  TerrainPoiPresenter,
   TerrainPoiStats,
-  TerrainPoiSystem
-} from "./TerrainPoiSystem";
+  TerrainPresentationFactories,
+  TerrainRoadPresenter
+} from "./TerrainPresentation";
 import { TerrainPoiFootprintSystem } from "./TerrainPoiFootprintSystem";
 import { TerrainRoad, TerrainRoadPlanner } from "./TerrainRoadPlanner";
 import { TerrainRoadStats, TerrainRoadSystem } from "./TerrainRoadSystem";
-import type { BuiltTerrain } from "../builder";
 
 export class TerrainFeatureRuntime {
   private readonly poiPlanner: TerrainPoiPlanner | null;
-  private readonly poiSystem: TerrainPoiSystem | null;
+  private readonly poiPresenter: TerrainPoiPresenter | null;
   private readonly poiFootprintSystem: TerrainPoiFootprintSystem | null;
   private readonly roadPlanner: TerrainRoadPlanner | null;
-  private readonly roadSystem: TerrainRoadSystem | null;
+  private readonly roadPresenter: TerrainRoadPresenter | null;
   private poiVisible = false;
   private poiMarkerMeshesVisible = true;
   private poiLabelsVisible = true;
   private poiFootprintsVisible = true;
   private roadVisible = false;
-  private poiDebugConfig: TerrainPoiDebugConfig = {
-    ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG,
-    kinds: { ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG.kinds },
-    mineResources: { ...DEFAULT_TERRAIN_POI_DEBUG_CONFIG.mineResources }
-  };
+  private poiDebugConfig: TerrainPoiDebugConfig = createDefaultPoiDebugConfig();
 
   constructor(
     private readonly scene: Scene,
     private readonly config: TerrainConfig,
     private readonly generator: ProceduralGenerator,
-    prebuiltWorld: BuiltTerrain | null
+    prebuiltWorld: BuiltTerrain | null,
+    presentationFactories: TerrainPresentationFactories = {}
   ) {
+    const prebuiltPoiSites = prebuiltWorld
+      ? prebuiltWorld.poiSites.map(toTerrainPoi)
+      : [];
+    const prebuiltRoads = prebuiltWorld
+      ? prebuiltWorld.roads.map(toTerrainRoad)
+      : [];
     this.poiPlanner = this.config.features.poi
       ? new TerrainPoiPlanner(this.config, this.generator)
       : null;
-    this.poiSystem = this.poiPlanner
-      ? new TerrainPoiSystem(
+    this.poiPresenter = this.poiPlanner && presentationFactories.createPoiPresenter
+      ? presentationFactories.createPoiPresenter(
           this.scene,
           this.poiPlanner,
-          prebuiltWorld?.poiSites ?? []
+          prebuiltPoiSites
         )
       : null;
     this.poiFootprintSystem = this.poiPlanner
       ? new TerrainPoiFootprintSystem(
           this.scene,
           this.generator,
-          prebuiltWorld?.poiSites ?? []
+          prebuiltPoiSites
         )
       : null;
     this.roadPlanner =
       this.config.features.poi && this.config.features.roads
         ? new TerrainRoadPlanner(this.config, this.generator)
         : null;
-    this.roadSystem = this.roadPlanner
+    this.roadPresenter = this.roadPlanner
       ? new TerrainRoadSystem(
           this.scene,
           this.roadPlanner,
           this.config,
-          prebuiltWorld?.roads ?? []
+          prebuiltRoads
         )
       : null;
   }
 
   initialize(): void {
-    if (this.poiSystem) {
-      this.poiSystem.initialize();
-      this.poiSystem.setDebugConfig(this.poiDebugConfig);
-      this.poiSystem.setMarkerMeshesVisible(this.poiMarkerMeshesVisible);
-      this.poiSystem.setLabelsVisible(this.poiLabelsVisible);
+    if (this.poiPresenter) {
+      this.poiPresenter.initialize();
+      this.poiPresenter.setDebugConfig(this.poiDebugConfig);
+      this.poiPresenter.setMarkerMeshesVisible(this.poiMarkerMeshesVisible);
+      this.poiPresenter.setLabelsVisible(this.poiLabelsVisible);
       this.poiVisible = true;
     }
     if (this.poiFootprintSystem) {
       this.poiFootprintSystem.initialize();
       this.poiFootprintSystem.setVisible(this.poiFootprintsVisible);
     }
-    if (this.poiSystem && this.roadSystem) {
-      this.roadSystem.initialize(this.poiSystem.getSites());
+    if (this.poiPresenter && this.roadPresenter) {
+      this.roadPresenter.initialize(this.poiPresenter.getSites());
       this.roadVisible = true;
     }
   }
 
   update(): void {
-    this.poiSystem?.setVisible(this.poiVisible);
-    this.roadSystem?.setVisible(this.roadVisible);
-    this.poiSystem?.update();
+    this.poiPresenter?.setVisible(this.poiVisible);
+    this.roadPresenter?.setVisible(this.roadVisible);
+    this.poiPresenter?.update();
   }
 
   dispose(): void {
-    this.poiSystem?.dispose();
+    this.poiPresenter?.dispose();
     this.poiFootprintSystem?.dispose();
-    this.roadSystem?.dispose();
+    this.roadPresenter?.dispose();
   }
 
   getPoiSites(): readonly TerrainPoi[] {
-    return this.poiSystem?.getSites() ?? [];
+    return this.poiPresenter?.getSites() ?? [];
   }
 
   getRoads(): readonly TerrainRoad[] {
-    return this.roadSystem?.getRoads() ?? [];
+    return this.roadPresenter?.getRoads() ?? [];
   }
 
   getRoadMaskTexture(): DynamicTexture | null {
-    return this.roadSystem?.getRoadMaskTexture() ?? null;
+    return this.roadPresenter?.getRoadMaskTexture() ?? null;
   }
 
   setShowPoi(enabled: boolean): void {
     this.poiVisible = enabled && this.config.features.poi;
-    this.poiSystem?.setVisible(this.poiVisible);
+    this.poiPresenter?.setVisible(this.poiVisible);
   }
 
   getShowPoi(): boolean {
@@ -122,7 +130,7 @@ export class TerrainFeatureRuntime {
 
   setPoiMarkerMeshesVisible(enabled: boolean): void {
     this.poiMarkerMeshesVisible = enabled;
-    this.poiSystem?.setMarkerMeshesVisible(enabled);
+    this.poiPresenter?.setMarkerMeshesVisible(enabled);
   }
 
   getPoiMarkerMeshesVisible(): boolean {
@@ -131,7 +139,7 @@ export class TerrainFeatureRuntime {
 
   setPoiLabelsVisible(enabled: boolean): void {
     this.poiLabelsVisible = enabled;
-    this.poiSystem?.setLabelsVisible(enabled);
+    this.poiPresenter?.setLabelsVisible(enabled);
   }
 
   getPoiLabelsVisible(): boolean {
@@ -149,7 +157,7 @@ export class TerrainFeatureRuntime {
 
   setShowRoads(enabled: boolean): void {
     this.roadVisible = enabled && this.config.features.roads;
-    this.roadSystem?.setVisible(this.roadVisible);
+    this.roadPresenter?.setVisible(this.roadVisible);
   }
 
   getShowRoads(): boolean {
@@ -162,7 +170,7 @@ export class TerrainFeatureRuntime {
       kinds: { ...config.kinds },
       mineResources: { ...config.mineResources }
     };
-    this.poiSystem?.setDebugConfig(this.poiDebugConfig);
+    this.poiPresenter?.setDebugConfig(this.poiDebugConfig);
   }
 
   getPoiDebugConfig(): TerrainPoiDebugConfig {
@@ -175,7 +183,7 @@ export class TerrainFeatureRuntime {
 
   getPoiStats(): TerrainPoiStats {
     return (
-      this.poiSystem?.getStats() ?? {
+      this.poiPresenter?.getStats() ?? {
         total: 0,
         villages: 0,
         outposts: 0,
@@ -186,7 +194,7 @@ export class TerrainFeatureRuntime {
 
   getPoiMeshStats(): TerrainPoiMeshStats {
     return (
-      this.poiSystem?.getMeshStats() ?? {
+      this.poiPresenter?.getMeshStats() ?? {
         total: 0,
         enabled: 0
       }
@@ -194,9 +202,65 @@ export class TerrainFeatureRuntime {
   }
 
   getRoadStats(): TerrainRoadStats {
-    return this.roadSystem?.getStats() ?? {
+    return this.roadPresenter?.getStats() ?? {
       totalRoads: 0,
       totalPoints: 0
     };
+  }
+}
+
+function createDefaultPoiDebugConfig(): TerrainPoiDebugConfig {
+  return {
+    showScores: false,
+    showRadii: false,
+    showTags: true,
+    kinds: {
+      [TerrainPoiKind.Village]: true,
+      [TerrainPoiKind.Outpost]: true,
+      [TerrainPoiKind.Mine]: true
+    },
+    mineResources: {
+      coal: true,
+      iron: true,
+      copper: true
+    }
+  };
+}
+
+function toTerrainPoi(site: BuiltTerrainPoi): TerrainPoi {
+  return {
+    id: site.id,
+    kind: toTerrainPoiKind(site.kind),
+    x: site.x,
+    y: site.y,
+    z: site.z,
+    score: site.score,
+    radius: site.radius,
+    tags: [...site.tags]
+  };
+}
+
+function toTerrainRoad(road: BuiltTerrainRoad): TerrainRoad {
+  return {
+    id: road.id,
+    fromPoiId: road.fromPoiId,
+    toPoiId: road.toPoiId,
+    cost: road.cost,
+    points: road.points.map((point) => ({
+      x: point.x,
+      y: point.y,
+      z: point.z
+    }))
+  };
+}
+
+function toTerrainPoiKind(kind: BuiltTerrainPoi["kind"]): TerrainPoiKind {
+  switch (kind) {
+    case "village":
+      return TerrainPoiKind.Village;
+    case "outpost":
+      return TerrainPoiKind.Outpost;
+    case "mine":
+      return TerrainPoiKind.Mine;
   }
 }

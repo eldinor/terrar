@@ -1,16 +1,19 @@
 import type {
-  TerrainConfigOverrides,
-  TerrainErosionConfig,
-  TerrainFeatureConfig,
-  TerrainPoiConfig,
-  TerrainRiverConfig,
-  TerrainShapeConfig,
-} from "./terrain/TerrainConfig";
+  BuiltTerrainConfigOverrides as TerrainConfigOverrides,
+  BuiltTerrainErosionConfig as TerrainErosionConfig,
+  BuiltTerrainFeatureConfig as TerrainFeatureConfig,
+  BuiltTerrainPoiConfig as TerrainPoiConfig,
+  BuiltTerrainRiverConfig as TerrainRiverConfig,
+  BuiltTerrainShapeConfig as TerrainShapeConfig
+} from "./builder";
 import type { TerrainMineResource, TerrainPoiKind } from "./terrain/TerrainPoiPlanner";
-import type { TerrainPoiDebugConfig } from "./terrain/TerrainPoiSystem";
-import type { TerrainWaterConfig } from "./terrain/TerrainWaterSystem";
-import { TerrainDebugViewMode, TerrainLayerThresholds } from "./terrain/materials";
-import { createTerrainDemo } from "./main";
+import type { BabylonTerrainPoiDebugConfig as TerrainPoiDebugConfig } from "./adapters/babylon";
+import type { BabylonTerrainWaterConfig as TerrainWaterConfig } from "./adapters/babylon";
+import {
+  BabylonTerrainDebugViewMode as TerrainDebugViewMode,
+  BabylonTerrainLayerThresholds as TerrainLayerThresholds
+} from "./adapters/babylon";
+import { createTerrainDemo } from "./demo/createTerrainDemo";
 
 interface TerrainPreset {
   readonly name: string;

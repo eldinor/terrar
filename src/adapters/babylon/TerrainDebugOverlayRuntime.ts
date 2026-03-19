@@ -1,9 +1,10 @@
 import { Scene } from "@babylonjs/core/scene";
-import { TerrainChunk } from "./TerrainChunk";
-import { TerrainConfig } from "./TerrainConfig";
+import { TerrainChunk } from "../../terrain/TerrainChunk";
+import { TerrainConfig } from "../../terrain/TerrainConfig";
+import type { TerrainDebugOverlayController } from "../../terrain/TerrainPresentation";
 import type { TerrainDebugOverlay } from "./TerrainDebugOverlay";
 
-export class TerrainDebugOverlayRuntime {
+export class TerrainDebugOverlayRuntime implements TerrainDebugOverlayController {
   private debugOverlay: TerrainDebugOverlay | null = null;
   private debugOverlayPromise: Promise<TerrainDebugOverlay> | null = null;
 

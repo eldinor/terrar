@@ -1,16 +1,20 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
-import { BuiltTerrain } from "../../builder";
-import { TerrainPoi } from "../../terrain/TerrainPoiPlanner";
-import { TerrainRoad } from "../../terrain/TerrainRoadPlanner";
+import { BuiltTerrain, BuiltTerrainPoi, BuiltTerrainRoad } from "../../builder";
+import { TerrainPoiSystem } from "./TerrainPoiSystem";
+import { TerrainDebugOverlayRuntime } from "./TerrainDebugOverlayRuntime";
 import { TerrainSystem, TerrainSystemBuildOptions } from "../../terrain/TerrainSystem";
 import {
-  TerrainDebugViewMode,
-  TerrainLayerThresholds,
-  TerrainMaterialConfig
+  TerrainDebugViewMode as BabylonTerrainDebugViewMode,
+  TerrainLayerThresholds as BabylonTerrainLayerThresholds,
+  TerrainMaterialConfig as BabylonTerrainMaterialConfig
 } from "../../terrain/materials";
-import { TerrainWaterConfig } from "../../terrain/TerrainWaterSystem";
-import { BabylonTerrainAdapter, BabylonTerrainAdapterOptions } from "./types";
+import { TerrainWaterConfig as BabylonTerrainWaterConfig } from "../../terrain/TerrainWaterSystem";
+import {
+  BabylonTerrainAdapter,
+  BabylonTerrainAdapterOptions,
+  BabylonTerrainPoiDebugConfig
+} from "./types";
 
 export function renderBuiltTerrain(
   scene: Scene,
@@ -37,7 +41,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
       terrain.config,
       options.textureOptions,
       terrain,
-      options.buildOptions ?? {}
+      mapBuildOptions(options.buildOptions)
     );
   }
 
@@ -85,7 +89,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getWaterLevel();
   }
 
-  setWaterConfig(config: TerrainWaterConfig): void {
+  setWaterConfig(config: BabylonTerrainWaterConfig): void {
     this.terrainSystem.setWaterConfig(config);
   }
 
@@ -177,7 +181,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getFoliageStats();
   }
 
-  getPoiSites(): readonly TerrainPoi[] {
+  getPoiSites(): readonly BuiltTerrainPoi[] {
     return this.terrainSystem.getPoiSites();
   }
 
@@ -189,7 +193,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getPoiMeshStats();
   }
 
-  setPoiDebugConfig(config: import("../../terrain/TerrainPoiSystem").TerrainPoiDebugConfig): void {
+  setPoiDebugConfig(config: BabylonTerrainPoiDebugConfig): void {
     this.terrainSystem.setPoiDebugConfig(config);
   }
 
@@ -197,7 +201,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getPoiDebugConfig();
   }
 
-  getRoads(): readonly TerrainRoad[] {
+  getRoads(): readonly BuiltTerrainRoad[] {
     return this.terrainSystem.getRoads();
   }
 
@@ -205,7 +209,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getRoadStats();
   }
 
-  setDebugViewMode(mode: TerrainDebugViewMode): void {
+  setDebugViewMode(mode: BabylonTerrainDebugViewMode): void {
     this.terrainSystem.setDebugViewMode(mode);
   }
 
@@ -213,7 +217,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getDebugViewMode();
   }
 
-  setTerrainMaterialConfig(config: TerrainMaterialConfig): void {
+  setTerrainMaterialConfig(config: BabylonTerrainMaterialConfig): void {
     this.terrainSystem.setTerrainMaterialConfig(config);
   }
 
@@ -221,7 +225,7 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getTerrainMaterialConfig();
   }
 
-  setTerrainMaterialThresholds(thresholds: TerrainLayerThresholds): void {
+  setTerrainMaterialThresholds(thresholds: BabylonTerrainLayerThresholds): void {
     this.terrainSystem.setTerrainMaterialThresholds(thresholds);
   }
 
@@ -248,8 +252,25 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
   isApplyingChunkMeshes(): boolean {
     return this.terrainSystem.isApplyingChunkMeshes();
   }
+}
 
-  getTerrainSystem(): TerrainSystem {
-    return this.terrainSystem;
+function mapBuildOptions(
+  buildOptions: BabylonTerrainAdapterOptions["buildOptions"]
+): TerrainSystemBuildOptions {
+  if (!buildOptions) {
+    return {};
   }
+
+  return {
+    chunkBuildCoordinator: buildOptions.chunkBuildCoordinator,
+    chunkBuildVersion: buildOptions.chunkBuildVersion,
+    initialCameraPosition: buildOptions.initialCameraPosition,
+    onChunkBuildProgress: buildOptions.onChunkBuildProgress,
+    presentation: {
+      createPoiPresenter: (scene, planner, prebuiltSites) =>
+        new TerrainPoiSystem(scene, planner, prebuiltSites),
+      createDebugOverlayController: (scene, chunks, config) =>
+        new TerrainDebugOverlayRuntime(scene, chunks, config)
+    }
+  };
 }

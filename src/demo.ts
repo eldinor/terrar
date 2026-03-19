@@ -7,7 +7,11 @@ import type {
   BuiltTerrainShapeConfig as TerrainShapeConfig
 } from "./builder";
 import type { TerrainMineResource, TerrainPoiKind } from "./terrain/TerrainPoiPlanner";
-import type { BabylonTerrainPoiDebugConfig as TerrainPoiDebugConfig } from "./adapters/babylon";
+import type {
+  BabylonTerrainPoiDebugConfig as TerrainPoiDebugConfig,
+  BabylonTerrainPoiMeshStats as TerrainPoiMeshStats,
+  BabylonTerrainPoiStats as TerrainPoiStats
+} from "./adapters/babylon";
 import type { BabylonTerrainWaterConfig as TerrainWaterConfig } from "./adapters/babylon";
 import {
   BabylonTerrainDebugViewMode as TerrainDebugViewMode,
@@ -27,6 +31,58 @@ interface PresetFeatureState {
   readonly hidePoiLabels: boolean;
   readonly showPoiFootprints: boolean;
 }
+
+export interface LegacyFeaturePanelState {
+  readonly features: TerrainFeatureConfig;
+  readonly hidePoiMarkerMeshes: boolean;
+  readonly hidePoiLabels: boolean;
+  readonly showPoiFootprints: boolean;
+  readonly poiDebug: TerrainPoiDebugConfig;
+  readonly poiStats: TerrainPoiStats;
+  readonly poiMeshStats: TerrainPoiMeshStats;
+}
+
+export interface LegacyRuntimeTabState {
+  readonly waterLevel: number;
+  readonly water: TerrainWaterConfig;
+  readonly buildFoliage: boolean;
+  readonly showFoliage: boolean;
+  readonly collisionRadius: number;
+  readonly foliageRadius: number;
+  readonly lodDistances: readonly [number, number, number];
+  readonly debugViewMode: TerrainDebugViewMode;
+}
+
+export interface LegacyMaterialTabState {
+  readonly useGeneratedTextures: boolean;
+  readonly materialThresholds: TerrainLayerThresholds;
+  readonly materialScales: DraftConfig["materialScales"];
+  readonly blendSharpness: number;
+  readonly shorelineStartOffset: number;
+  readonly shorelineEndOffset: number;
+  readonly sedimentStrength: number;
+  readonly sedimentSandBias: number;
+  readonly smallRiverTintStrength: number;
+  readonly smallRiverTintBrightness: number;
+  readonly smallRiverTintSaturation: number;
+  readonly baseHeight: number;
+  readonly maxHeight: number;
+}
+
+export interface LegacyWorldTabState {
+  readonly seed: string;
+  readonly worldSize: number;
+  readonly chunksPerAxis: number;
+  readonly chunkSize: number;
+  readonly baseHeight: number;
+  readonly maxHeight: number;
+  readonly erosion: TerrainErosionConfig;
+  readonly poi: TerrainPoiConfig;
+  readonly rivers: TerrainRiverConfig;
+  readonly shape: TerrainShapeConfig;
+}
+
+export type PanelTab = "runtime" | "material" | "world" | "presets";
 
 const BUILTIN_PRESETS: readonly TerrainPreset[] = [
   {
@@ -120,6 +176,14 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
 ] as const;
 
 const SAVED_PRESETS_KEY = "terrar.saved-presets";
+export const LEGACY_HUD_EVENT = "terrar:legacy-hud-update";
+export const LEGACY_FEATURE_STATUS_EVENT = "terrar:legacy-feature-status-update";
+export const LEGACY_FEATURE_PANEL_EVENT = "terrar:legacy-feature-panel-update";
+export const LEGACY_RUNTIME_TAB_EVENT = "terrar:legacy-runtime-tab-update";
+export const LEGACY_MATERIAL_TAB_EVENT = "terrar:legacy-material-tab-update";
+export const LEGACY_WORLD_TAB_EVENT = "terrar:legacy-world-tab-update";
+export const LEGACY_LEFT_PANEL_EVENT = "terrar:legacy-left-panel-update";
+export const LEGACY_PRESETS_EVENT = "terrar:legacy-presets-update";
 
 const mount = document.getElementById("app");
 
@@ -131,23 +195,8 @@ const canvas = document.createElement("canvas");
 canvas.id = "terrain-canvas";
 mount.appendChild(canvas);
 
-const demo = createTerrainDemo(canvas);
-type PanelTab = "runtime" | "material" | "world" | "presets";
+export const demo = createTerrainDemo(canvas);
 let buildStatus = demo.getBuildStatus();
-let featureBuildStatusText: HTMLDivElement | null = null;
-const hud = document.createElement("div");
-hud.style.position = "fixed";
-hud.style.top = "16px";
-hud.style.left = "16px";
-hud.style.padding = "10px 12px";
-hud.style.border = "1px solid rgba(255, 255, 255, 0.18)";
-hud.style.borderRadius = "10px";
-hud.style.background = "rgba(6, 10, 15, 0.72)";
-hud.style.color = "#f4edc9";
-hud.style.font = "12px/1.45 Consolas, 'Courier New', monospace";
-hud.style.zIndex = "10";
-hud.style.userSelect = "none";
-document.body.appendChild(hud);
 
 const panel = document.createElement("div");
 panel.style.position = "fixed";
@@ -196,7 +245,7 @@ let draftConfig = buildDraftConfig();
 let presetOptions = getPresetOptions();
 let activeTab: PanelTab = "runtime";
 
-function renderHud(): void {
+export function getLegacyHudText(): string {
   const debugState = loadingDebug ? "loading" : debugVisible ? "on" : "off";
   const foliage = demo.getFoliageStats();
   const poi = demo.getPoiStats();
@@ -208,16 +257,377 @@ function renderHud(): void {
       ? "sab:off"
       : "workers:off";
   const buildText = buildStatus.phase === "idle" ? "" : ` | build: ${buildStatus.message}`;
-  hud.textContent =
+  return (
     `G debug: ${debugState} | V wireframe: ${wireframe ? "on" : "off"} | ` +
     `foliage: ${foliage.visibleInstances}/${foliage.totalInstances} ` +
     `(T ${foliage.visibleTrees}/${foliage.totalTrees}, ` +
     `B ${foliage.visibleBushes}/${foliage.totalBushes}, ` +
     `R ${foliage.visibleRocks}/${foliage.totalRocks}) | ` +
-    `poi: ${poi.total} | roads: ${roads.totalRoads} | ${workerText}${buildText}`;
+    `poi: ${poi.total} | roads: ${roads.totalRoads} | ${workerText}${buildText}`
+  );
+}
+
+export function getFeatureBuildStatusText(): string {
+  const summary = draftConfig.features.poi
+    ? draftConfig.features.roads
+      ? "POI and roads will rebuild into the world."
+      : "POI will load on rebuild. Roads remain disabled."
+    : "POI and roads are excluded by default.";
+  const workerStatus = demo.getWorkerStatus();
+  const workerLine = workerStatus.workersEnabled
+    ? workerStatus.sharedSnapshotsEnabled
+      ? "Workers active. Shared snapshots enabled."
+      : "Workers active. Shared snapshots unavailable."
+    : "Workers unavailable. Main-thread fallback only.";
+  const workerDetail =
+    `crossOriginIsolated: ${workerStatus.crossOriginIsolated}\n` +
+    `SharedArrayBuffer: ${workerStatus.sharedArrayBufferDefined}\n` +
+    `Snapshot Mode: ${workerStatus.snapshotMode}\n` +
+    `Live Terrain Systems: ${workerStatus.liveTerrainSystems}\n` +
+    `Chunks: ${workerStatus.chunkCount}\n` +
+    `Loaded Chunk Meshes: ${workerStatus.loadedChunkMeshes}\n` +
+    `Mesh Apply: ${workerStatus.applyingChunkMeshes ? "active" : "idle"}\n` +
+    `Pending Chunk Meshes: ${workerStatus.pendingChunkMeshes}`;
+  const buildProfile = demo.getBuildProfile();
+  const profileDetail =
+    `\nWorld Build: ${formatDuration(buildProfile.lastWorldBuildMs)}\n` +
+    `Terrain Swap: ${formatDuration(buildProfile.lastTerrainSwapMs)}\n` +
+    `Chunk Workers: ${formatDuration(buildProfile.lastChunkWorkerBuildMs)}\n` +
+    `Mesh Apply: ${formatDuration(buildProfile.lastMeshApplyMs)}\n` +
+    `Total Rebuild: ${formatDuration(buildProfile.lastTotalRebuildMs)}`;
+  const progress = buildStatus.phase === "idle" ? "" : `\n${buildStatus.message}`;
+  return `${summary}\n${workerLine}\n${workerDetail}${profileDetail}${progress}`;
+}
+
+export function getPresetOptionsData(): TerrainPreset[] {
+  return presetOptions.map(clonePreset);
+}
+
+export function getFeaturePanelState(): LegacyFeaturePanelState {
+  return {
+    features: { ...draftConfig.features },
+    hidePoiMarkerMeshes: draftConfig.hidePoiMarkerMeshes,
+    hidePoiLabels: draftConfig.hidePoiLabels,
+    showPoiFootprints: draftConfig.showPoiFootprints,
+    poiDebug: clonePoiDebugConfig(draftConfig.poiDebug),
+    poiStats: demo.getPoiStats(),
+    poiMeshStats: demo.getPoiMeshStats()
+  };
+}
+
+export function getRuntimeTabState(): LegacyRuntimeTabState {
+  return {
+    waterLevel: draftConfig.waterLevel,
+    water: { ...draftConfig.water },
+    buildFoliage: draftConfig.buildFoliage,
+    showFoliage: draftConfig.showFoliage,
+    collisionRadius: draftConfig.collisionRadius,
+    foliageRadius: draftConfig.foliageRadius,
+    lodDistances: [...draftConfig.lodDistances] as [number, number, number],
+    debugViewMode: demo.getDebugViewMode()
+  };
+}
+
+export function getMaterialTabState(): LegacyMaterialTabState {
+  return {
+    useGeneratedTextures: draftConfig.useGeneratedTextures,
+    materialThresholds: { ...draftConfig.materialThresholds },
+    materialScales: { ...draftConfig.materialScales },
+    blendSharpness: draftConfig.blendSharpness,
+    shorelineStartOffset: draftConfig.shorelineStartOffset,
+    shorelineEndOffset: draftConfig.shorelineEndOffset,
+    sedimentStrength: draftConfig.sedimentStrength,
+    sedimentSandBias: draftConfig.sedimentSandBias,
+    smallRiverTintStrength: draftConfig.smallRiverTintStrength,
+    smallRiverTintBrightness: draftConfig.smallRiverTintBrightness,
+    smallRiverTintSaturation: draftConfig.smallRiverTintSaturation,
+    baseHeight: draftConfig.baseHeight,
+    maxHeight: draftConfig.maxHeight
+  };
+}
+
+export function getWorldTabState(): LegacyWorldTabState {
+  return {
+    seed: draftConfig.seed,
+    worldSize: draftConfig.worldSize,
+    chunksPerAxis: draftConfig.chunksPerAxis,
+    chunkSize: draftConfig.chunkSize,
+    baseHeight: draftConfig.baseHeight,
+    maxHeight: draftConfig.maxHeight,
+    erosion: { ...draftConfig.erosion },
+    poi: { ...draftConfig.poi },
+    rivers: { ...draftConfig.rivers },
+    shape: { ...draftConfig.shape }
+  };
+}
+
+export function getActivePanelTab(): PanelTab {
+  return activeTab;
+}
+
+export function setFeaturePanelState(state: LegacyFeaturePanelState): void {
+  draftConfig.features = { ...state.features };
+  if (!draftConfig.features.poi) {
+    draftConfig.features.roads = false;
+  }
+  draftConfig.hidePoiMarkerMeshes = state.hidePoiMarkerMeshes;
+  draftConfig.hidePoiLabels = state.hidePoiLabels;
+  draftConfig.showPoiFootprints = state.showPoiFootprints;
+  draftConfig.poiDebug = clonePoiDebugConfig(state.poiDebug);
+
+  demo.setPoiMarkerMeshesVisible(!draftConfig.hidePoiMarkerMeshes);
+  demo.setPoiLabelsVisible(!draftConfig.hidePoiLabels);
+  demo.setShowPoiFootprints(draftConfig.showPoiFootprints);
+  demo.setPoiDebugConfig(draftConfig.poiDebug);
+
+  renderFeaturePanel();
+  renderFeatureStatus();
+  renderHud();
+}
+
+export function setRuntimeTabState(state: LegacyRuntimeTabState): void {
+  draftConfig.waterLevel = state.waterLevel;
+  draftConfig.water = { ...state.water };
+  draftConfig.buildFoliage = state.buildFoliage;
+  draftConfig.showFoliage = state.buildFoliage ? state.showFoliage : false;
+  draftConfig.collisionRadius = state.collisionRadius;
+  draftConfig.foliageRadius = state.foliageRadius;
+
+  const nextLodDistances = [...state.lodDistances] as [number, number, number];
+  nextLodDistances[1] = Math.max(nextLodDistances[1], nextLodDistances[0] + 10);
+  nextLodDistances[2] = Math.max(nextLodDistances[2], nextLodDistances[1] + 10);
+  draftConfig.lodDistances = nextLodDistances;
+
+  demo.setWaterLevel(draftConfig.waterLevel);
+  applyDraftWaterConfig();
+  demo.setCollisionRadius(draftConfig.collisionRadius);
+  demo.setFoliageRadius(draftConfig.foliageRadius);
+  demo.setShowFoliage(draftConfig.showFoliage);
+  demo.setLodDistances(draftConfig.lodDistances);
+  demo.setDebugViewMode(state.debugViewMode);
+
+  renderPanel();
+  renderHud();
+}
+
+export function setMaterialTabState(state: LegacyMaterialTabState): void {
+  draftConfig.useGeneratedTextures = state.useGeneratedTextures;
+  draftConfig.materialThresholds = { ...state.materialThresholds };
+  draftConfig.materialScales = { ...state.materialScales };
+  draftConfig.blendSharpness = state.blendSharpness;
+  draftConfig.shorelineStartOffset = Math.min(state.shorelineStartOffset, state.shorelineEndOffset - 0.5);
+  draftConfig.shorelineEndOffset = Math.max(state.shorelineEndOffset, draftConfig.shorelineStartOffset + 0.5);
+  draftConfig.sedimentStrength = state.sedimentStrength;
+  draftConfig.sedimentSandBias = state.sedimentSandBias;
+  draftConfig.smallRiverTintStrength = state.smallRiverTintStrength;
+  draftConfig.smallRiverTintBrightness = state.smallRiverTintBrightness;
+  draftConfig.smallRiverTintSaturation = state.smallRiverTintSaturation;
+
+  draftConfig.materialThresholds.rockSlopeStart = Math.min(
+    draftConfig.materialThresholds.rockSlopeStart,
+    draftConfig.materialThresholds.rockSlopeFull - 0.02,
+  );
+  draftConfig.materialThresholds.rockSlopeFull = Math.max(
+    draftConfig.materialThresholds.rockSlopeFull,
+    draftConfig.materialThresholds.rockSlopeStart + 0.02,
+  );
+  draftConfig.materialThresholds.snowStartHeight = Math.min(
+    draftConfig.materialThresholds.snowStartHeight,
+    draftConfig.materialThresholds.snowFullHeight - 1,
+  );
+  draftConfig.materialThresholds.snowFullHeight = Math.max(
+    draftConfig.materialThresholds.snowFullHeight,
+    draftConfig.materialThresholds.snowStartHeight + 1,
+  );
+  draftConfig.materialThresholds.dirtLowHeight = Math.min(
+    draftConfig.materialThresholds.dirtLowHeight,
+    draftConfig.materialThresholds.dirtHighHeight - 1,
+  );
+  draftConfig.materialThresholds.dirtHighHeight = Math.max(
+    draftConfig.materialThresholds.dirtHighHeight,
+    draftConfig.materialThresholds.dirtLowHeight + 1,
+  );
+
+  runAsyncTask(demo.setUseGeneratedTextures(draftConfig.useGeneratedTextures));
+  demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
+  applyDraftMaterialConfig();
+  renderPanel();
+}
+
+export function setWorldTabState(state: LegacyWorldTabState): void {
+  draftConfig.seed = state.seed.trim() === "" ? "1337" : state.seed;
+  draftConfig.chunksPerAxis = state.chunksPerAxis;
+  draftConfig.chunkSize = state.chunkSize;
+  syncDraftWorldBounds();
+  draftConfig.baseHeight = state.baseHeight;
+  draftConfig.maxHeight = Math.max(state.maxHeight, draftConfig.baseHeight + 40);
+  draftConfig.shape = { ...state.shape };
+  draftConfig.erosion = {
+    ...state.erosion,
+    resolution: clampErosionResolution(state.erosion.resolution)
+  };
+  draftConfig.rivers = {
+    ...state.rivers,
+    resolution: clampErosionResolution(state.rivers.resolution),
+    depth: Math.min(state.rivers.depth, state.rivers.maxDepth),
+    maxDepth: Math.max(state.rivers.maxDepth, state.rivers.depth)
+  };
+  draftConfig.poi = { ...state.poi };
+}
+
+export function retuneWorldTabForWorldSize(): void {
+  retuneDraftForWorldSize();
+  demo.setCollisionRadius(draftConfig.collisionRadius);
+  demo.setFoliageRadius(draftConfig.foliageRadius);
+  demo.setLodDistances(draftConfig.lodDistances);
+  demo.setWaterConfig(draftConfig.water);
+  renderPanel();
+  renderHud();
+}
+
+export function setActivePanelTab(tab: PanelTab): void {
+  activeTab = tab;
+  renderPanel();
+}
+
+export async function applyPresetByIndex(index: number): Promise<void> {
+  const preset = presetOptions[index];
+  if (!preset) {
+    return;
+  }
+
+  draftConfig = mergeDraftWithOverrides(buildDraftConfig(), preset.config);
+  if (preset.featureState) {
+    draftConfig.poiDebug = clonePoiDebugConfig(preset.featureState.poiDebug);
+    draftConfig.hidePoiMarkerMeshes = preset.featureState.hidePoiMarkerMeshes;
+    draftConfig.hidePoiLabels = preset.featureState.hidePoiLabels;
+    draftConfig.showPoiFootprints = preset.featureState.showPoiFootprints;
+  }
+
+  renderPresetOptions();
+  renderPanel();
+  renderFeaturePanel();
+  renderHud();
+  renderFeatureStatus();
+}
+
+export function saveCurrentPreset(name: string): void {
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error("Preset name is required.");
+  }
+
+  const savedPresets = mergeImportedPresets(getSavedPresets(), [buildPresetFromDraft(trimmedName)]);
+  savePresets(savedPresets);
+  presetOptions = getPresetOptions();
+  renderPresetOptions();
+  renderPanel();
+  renderFeaturePanel();
+}
+
+export function exportPresetByIndex(index: number): void {
+  const preset = presetOptions[index];
+  if (!preset) {
+    throw new Error("Preset not found.");
+  }
+
+  downloadJsonFile(`${slugifyPresetName(preset.name)}.json`, clonePreset(preset));
+}
+
+export function importPresetText(serialized: string): void {
+  const imported = parseImportedPresets(serialized);
+  const savedPresets = mergeImportedPresets(getSavedPresets(), imported);
+  savePresets(savedPresets);
+  presetOptions = getPresetOptions();
+  renderPresetOptions();
+  renderPanel();
+  renderFeaturePanel();
+}
+
+export async function rebuildTerrainFromDraft(): Promise<void> {
+  await applyDraftToWorld();
+}
+
+export function resetDraftTerrainConfig(): void {
+  draftConfig = buildDraftConfig();
+  renderPanel();
+  renderFeaturePanel();
+  renderHud();
+  renderFeatureStatus();
+}
+
+function renderHud(): void {
+  window.dispatchEvent(
+    new CustomEvent<string>(LEGACY_HUD_EVENT, {
+      detail: getLegacyHudText()
+    })
+  );
+}
+
+function renderFeatureStatus(): void {
+  window.dispatchEvent(
+    new CustomEvent<string>(LEGACY_FEATURE_STATUS_EVENT, {
+      detail: getFeatureBuildStatusText()
+    })
+  );
+}
+
+function renderFeaturePanelState(): void {
+  window.dispatchEvent(
+    new CustomEvent<LegacyFeaturePanelState>(LEGACY_FEATURE_PANEL_EVENT, {
+      detail: getFeaturePanelState()
+    })
+  );
+}
+
+function renderRuntimeTabState(): void {
+  window.dispatchEvent(
+    new CustomEvent<LegacyRuntimeTabState>(LEGACY_RUNTIME_TAB_EVENT, {
+      detail: getRuntimeTabState()
+    })
+  );
+}
+
+function renderMaterialTabState(): void {
+  window.dispatchEvent(
+    new CustomEvent<LegacyMaterialTabState>(LEGACY_MATERIAL_TAB_EVENT, {
+      detail: getMaterialTabState()
+    })
+  );
+}
+
+function renderWorldTabState(): void {
+  window.dispatchEvent(
+    new CustomEvent<LegacyWorldTabState>(LEGACY_WORLD_TAB_EVENT, {
+      detail: getWorldTabState()
+    })
+  );
+}
+
+function renderLeftPanelState(): void {
+  window.dispatchEvent(
+    new CustomEvent<PanelTab>(LEGACY_LEFT_PANEL_EVENT, {
+      detail: getActivePanelTab()
+    })
+  );
+}
+
+function renderPresetOptions(): void {
+  window.dispatchEvent(
+    new CustomEvent<TerrainPreset[]>(LEGACY_PRESETS_EVENT, {
+      detail: getPresetOptionsData()
+    })
+  );
 }
 
 renderHud();
+renderFeatureStatus();
+renderFeaturePanelState();
+renderRuntimeTabState();
+renderMaterialTabState();
+renderWorldTabState();
+renderLeftPanelState();
+renderPresetOptions();
 renderPanel();
 renderFeaturePanel();
 window.setInterval(() => {
@@ -228,6 +638,10 @@ demo.subscribeBuildStatus((status) => {
   buildStatus = status;
   renderHud();
   updateFeatureBuildStatus();
+  renderFeaturePanelState();
+  renderRuntimeTabState();
+  renderMaterialTabState();
+  renderWorldTabState();
 });
 
 window.addEventListener("keydown", async (event) => {
@@ -256,606 +670,34 @@ window.addEventListener("keydown", async (event) => {
 
 function renderPanel(): void {
   panel.replaceChildren();
-
-  panel.appendChild(createHeading("Terrain Tuning"));
-  panel.appendChild(createTabBar());
-
-  if (activeTab === "runtime") {
-    renderRuntimeTab();
-  } else if (activeTab === "material") {
-    renderMaterialTab();
-  } else if (activeTab === "world") {
-    renderWorldTab();
-  } else {
-    renderPresetsTab();
-  }
-
+  panel.appendChild(createLeftPanelMount());
+  renderRuntimeTabState();
+  renderMaterialTabState();
+  renderWorldTabState();
+  renderLeftPanelState();
   renderFeaturePanel();
 }
 
 function renderFeaturePanel(): void {
   featurePanel.replaceChildren();
-  featurePanel.appendChild(createHeading("World Features"));
-  featurePanel.appendChild(createSectionLabel("Build"));
-  featurePanel.appendChild(
-    createCheckbox("POI", draftConfig.features.poi, (checked) => {
-      draftConfig.features.poi = checked;
-      if (!checked) {
-        draftConfig.features.roads = false;
-      }
-      renderFeaturePanel();
-    }),
-  );
-  featurePanel.appendChild(
-    createCheckbox(
-      "Build Roads",
-      draftConfig.features.roads,
-      (checked) => {
-        draftConfig.features.roads = checked && draftConfig.features.poi;
-      },
-      !draftConfig.features.poi,
-    ),
-  );
-  featurePanel.appendChild(createFeatureBuildStatus());
-  featurePanel.appendChild(
-    createButton("Apply Features", () => {
-      return applyDraftToWorld();
-    }),
-  );
-
-  if (draftConfig.features.poi) {
-    featurePanel.appendChild(createDivider());
-    featurePanel.appendChild(createSectionLabel("POI Debug"));
-    featurePanel.appendChild(
-      createCheckbox("Hide Marker Meshes", draftConfig.hidePoiMarkerMeshes, (checked) => {
-        draftConfig.hidePoiMarkerMeshes = checked;
-        demo.setPoiMarkerMeshesVisible(!checked);
-      }),
-    );
-    featurePanel.appendChild(
-      createCheckbox("Hide POI Labels", draftConfig.hidePoiLabels, (checked) => {
-        draftConfig.hidePoiLabels = checked;
-        demo.setPoiLabelsVisible(!checked);
-      }),
-    );
-    featurePanel.appendChild(
-      createCheckbox("Show Footprints", draftConfig.showPoiFootprints, (checked) => {
-        draftConfig.showPoiFootprints = checked;
-        demo.setShowPoiFootprints(checked);
-      }),
-    );
-    featurePanel.appendChild(createPoiDebugControls());
-    featurePanel.appendChild(createPoiStatsRow());
-  }
+  featurePanel.appendChild(createFeaturePanelMount());
+  renderFeaturePanelState();
 }
 
 function renderRuntimeTab(): void {
-  panel.appendChild(createSectionLabel("Runtime"));
-  panel.appendChild(
-    createSlider("Water", -24, 32, 1, draftConfig.waterLevel, (value) => {
-      draftConfig.waterLevel = value;
-      demo.setWaterLevel(value);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Water Opacity", 0.1, 1, 0.01, draftConfig.water.opacity, (value) => {
-      draftConfig.water.opacity = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Shore Fade", 1, 32, 0.5, draftConfig.water.shoreFadeDistance, (value) => {
-      draftConfig.water.shoreFadeDistance = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Wave Scale X", 0.002, 0.05, 0.001, draftConfig.water.waveScaleX, (value) => {
-      draftConfig.water.waveScaleX = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Wave Scale Z", 0.002, 0.05, 0.001, draftConfig.water.waveScaleZ, (value) => {
-      draftConfig.water.waveScaleZ = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Wave Speed X", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedX, (value) => {
-      draftConfig.water.waveSpeedX = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Wave Speed Z", -0.12, 0.12, 0.005, draftConfig.water.waveSpeedZ, (value) => {
-      draftConfig.water.waveSpeedZ = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("River Discharge", 0.4, 1.8, 0.05, draftConfig.water.riverDischargeStrength, (value) => {
-      draftConfig.water.riverDischargeStrength = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("River Mesh Cutoff", 0.05, 0.6, 0.01, draftConfig.water.riverMeshThreshold, (value) => {
-      draftConfig.water.riverMeshThreshold = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("River Mesh Min Width", 0, 12, 0.5, draftConfig.water.riverMeshMinWidth, (value) => {
-      draftConfig.water.riverMeshMinWidth = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Lake Mesh Cutoff", 0.02, 0.3, 0.01, draftConfig.water.lakeMeshThreshold, (value) => {
-      draftConfig.water.lakeMeshThreshold = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Inland Res", 33, 513, 32, draftConfig.water.inlandMeshResolution, (value) => {
-      draftConfig.water.inlandMeshResolution = clampErosionResolution(value);
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Inland Smooth", 0, 6, 1, draftConfig.water.inlandSmoothingPasses, (value) => {
-      draftConfig.water.inlandSmoothingPasses = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(createWaterDebugControl());
-  panel.appendChild(
-    createColorInput("Shallow Color", draftConfig.water.shallowColor, (value) => {
-      draftConfig.water.shallowColor = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(
-    createColorInput("Deep Color", draftConfig.water.deepColor, (value) => {
-      draftConfig.water.deepColor = value;
-      applyDraftWaterConfig();
-    }),
-  );
-  panel.appendChild(createDivider());
-  panel.appendChild(createSectionLabel("Camera Radius"));
-  panel.appendChild(
-    createCheckbox("Build Foliage", draftConfig.buildFoliage, (checked) => {
-      draftConfig.buildFoliage = checked;
-      if (!checked) {
-        draftConfig.showFoliage = false;
-        demo.setShowFoliage(false);
-      } else {
-        draftConfig.showFoliage = true;
-        demo.setShowFoliage(true);
-      }
-      renderHud();
-      runAsyncTask(applyDraftToWorld());
-    }),
-  );
-  panel.appendChild(
-    createCheckbox("Show Foliage", draftConfig.showFoliage, (checked) => {
-      draftConfig.showFoliage = checked;
-      demo.setShowFoliage(checked);
-      renderHud();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Collision", 80, 480, 10, draftConfig.collisionRadius, (value) => {
-      draftConfig.collisionRadius = value;
-      demo.setCollisionRadius(value);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Foliage", 120, 2000, 10, draftConfig.foliageRadius, (value) => {
-      draftConfig.foliageRadius = value;
-      demo.setFoliageRadius(value);
-    }),
-  );
-  panel.appendChild(
-    createSlider("LOD0", 80, 280, 10, draftConfig.lodDistances[0], (value) => {
-      draftConfig.lodDistances[0] = value;
-      if (draftConfig.lodDistances[1] <= value) {
-        draftConfig.lodDistances[1] = value + 10;
-      }
-      if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
-        draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
-      }
-      demo.setLodDistances(draftConfig.lodDistances);
-    }),
-  );
-  panel.appendChild(
-    createSlider("LOD1", 160, 420, 10, draftConfig.lodDistances[1], (value) => {
-      draftConfig.lodDistances[1] = Math.max(value, draftConfig.lodDistances[0] + 10);
-      if (draftConfig.lodDistances[2] <= draftConfig.lodDistances[1]) {
-        draftConfig.lodDistances[2] = draftConfig.lodDistances[1] + 10;
-      }
-      demo.setLodDistances(draftConfig.lodDistances);
-    }),
-  );
-  panel.appendChild(
-    createSlider("LOD2", 260, 700, 10, draftConfig.lodDistances[2], (value) => {
-      draftConfig.lodDistances[2] = Math.max(value, draftConfig.lodDistances[1] + 10);
-      demo.setLodDistances(draftConfig.lodDistances);
-    }),
-  );
-  panel.appendChild(createDebugModeControl());
+  panel.appendChild(createRuntimeTabMount());
 }
 
 function renderMaterialTab(): void {
-  panel.appendChild(createSectionLabel("Material Blend"));
-  panel.appendChild(
-    createCheckbox("Use Generated Textures", draftConfig.useGeneratedTextures, (checked) => {
-      draftConfig.useGeneratedTextures = checked;
-      runAsyncTask(demo.setUseGeneratedTextures(checked));
-    }),
-  );
-  panel.appendChild(
-    createSlider("Rock Start", 0.05, 0.9, 0.01, draftConfig.materialThresholds.rockSlopeStart, (value) => {
-      draftConfig.materialThresholds.rockSlopeStart = Math.min(
-        value,
-        draftConfig.materialThresholds.rockSlopeFull - 0.02,
-      );
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Rock Full", 0.1, 1, 0.01, draftConfig.materialThresholds.rockSlopeFull, (value) => {
-      draftConfig.materialThresholds.rockSlopeFull = Math.max(
-        value,
-        draftConfig.materialThresholds.rockSlopeStart + 0.02,
-      );
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Grass Max Slope", 0.1, 0.9, 0.01, draftConfig.materialThresholds.grassMaxSlope, (value) => {
-      draftConfig.materialThresholds.grassMaxSlope = value;
-      demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-    }),
-  );
-  panel.appendChild(
-    createSlider(
-      "Snow Start",
-      draftConfig.baseHeight,
-      draftConfig.maxHeight,
-      1,
-      draftConfig.materialThresholds.snowStartHeight,
-      (value) => {
-        draftConfig.materialThresholds.snowStartHeight = Math.min(
-          value,
-          draftConfig.materialThresholds.snowFullHeight - 1,
-        );
-        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      },
-    ),
-  );
-  panel.appendChild(
-    createSlider(
-      "Snow Full",
-      draftConfig.baseHeight,
-      draftConfig.maxHeight,
-      1,
-      draftConfig.materialThresholds.snowFullHeight,
-      (value) => {
-        draftConfig.materialThresholds.snowFullHeight = Math.max(
-          value,
-          draftConfig.materialThresholds.snowStartHeight + 1,
-        );
-        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      },
-    ),
-  );
-  panel.appendChild(
-    createSlider(
-      "Dirt Low",
-      draftConfig.baseHeight,
-      draftConfig.maxHeight,
-      1,
-      draftConfig.materialThresholds.dirtLowHeight,
-      (value) => {
-        draftConfig.materialThresholds.dirtLowHeight = Math.min(
-          value,
-          draftConfig.materialThresholds.dirtHighHeight - 1,
-        );
-        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      },
-    ),
-  );
-  panel.appendChild(
-    createSlider(
-      "Dirt High",
-      draftConfig.baseHeight,
-      draftConfig.maxHeight,
-      1,
-      draftConfig.materialThresholds.dirtHighHeight,
-      (value) => {
-        draftConfig.materialThresholds.dirtHighHeight = Math.max(
-          value,
-          draftConfig.materialThresholds.dirtLowHeight + 1,
-        );
-        demo.setTerrainMaterialThresholds(draftConfig.materialThresholds);
-      },
-    ),
-  );
-  panel.appendChild(
-    createSlider("Grass Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.grassScale, (value) => {
-      draftConfig.materialScales.grassScale = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Dirt Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.dirtScale, (value) => {
-      draftConfig.materialScales.dirtScale = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Sand Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.sandScale, (value) => {
-      draftConfig.materialScales.sandScale = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Rock Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.rockScale, (value) => {
-      draftConfig.materialScales.rockScale = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Snow Scale", 0.02, 0.2, 0.005, draftConfig.materialScales.snowScale, (value) => {
-      draftConfig.materialScales.snowScale = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Macro Scale", 0.001, 0.03, 0.001, draftConfig.materialScales.macroScale, (value) => {
-      draftConfig.materialScales.macroScale = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Anti-Tile", 0, 1, 0.01, draftConfig.materialScales.antiTileStrength, (value) => {
-      draftConfig.materialScales.antiTileStrength = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Blend Sharpness", 0.5, 3, 0.05, draftConfig.blendSharpness, (value) => {
-      draftConfig.blendSharpness = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Sediment", 0, 2, 0.05, draftConfig.sedimentStrength, (value) => {
-      draftConfig.sedimentStrength = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Sediment Sand", 0, 1, 0.05, draftConfig.sedimentSandBias, (value) => {
-      draftConfig.sedimentSandBias = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Small River Tint", 0, 1.5, 0.05, draftConfig.smallRiverTintStrength, (value) => {
-      draftConfig.smallRiverTintStrength = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Small River Bright", 0.5, 1.8, 0.05, draftConfig.smallRiverTintBrightness, (value) => {
-      draftConfig.smallRiverTintBrightness = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Small River Sat", 0, 1.8, 0.05, draftConfig.smallRiverTintSaturation, (value) => {
-      draftConfig.smallRiverTintSaturation = value;
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Beach Start", 0, 8, 0.5, draftConfig.shorelineStartOffset, (value) => {
-      draftConfig.shorelineStartOffset = Math.min(value, draftConfig.shorelineEndOffset - 0.5);
-      applyDraftMaterialConfig();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Beach End", 2, 40, 0.5, draftConfig.shorelineEndOffset, (value) => {
-      draftConfig.shorelineEndOffset = Math.max(value, draftConfig.shorelineStartOffset + 0.5);
-      applyDraftMaterialConfig();
-    }),
-  );
+  panel.appendChild(createMaterialTabMount());
 }
 
 function renderWorldTab(): void {
-  panel.appendChild(createSectionLabel("Regenerate"));
-  panel.appendChild(
-    createTextInput("Seed", draftConfig.seed, (value) => {
-      draftConfig.seed = value.trim() === "" ? "1337" : value;
-    }),
-  );
-  panel.appendChild(createDivider());
-  panel.appendChild(createSectionLabel("World Size"));
-  panel.appendChild(
-    createSlider("Chunks / Axis", 6, 16, 1, draftConfig.chunksPerAxis, (value) => {
-      draftConfig.chunksPerAxis = value;
-      syncDraftWorldBounds();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Chunk Size", 64, 256, 16, draftConfig.chunkSize, (value) => {
-      draftConfig.chunkSize = value;
-      syncDraftWorldBounds();
-    }),
-  );
-  panel.appendChild(createInfoRow("World Size", String(draftConfig.worldSize)));
-  panel.appendChild(
-    createButton("Retune For World Size", () => {
-      retuneDraftForWorldSize();
-      demo.setCollisionRadius(draftConfig.collisionRadius);
-      demo.setFoliageRadius(draftConfig.foliageRadius);
-      demo.setLodDistances(draftConfig.lodDistances);
-      demo.setWaterConfig(draftConfig.water);
-      renderPanel();
-    }),
-  );
-  panel.appendChild(
-    createSlider("Base Height", -64, 32, 1, draftConfig.baseHeight, (value) => {
-      draftConfig.baseHeight = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Max Height", 120, 320, 5, draftConfig.maxHeight, (value) => {
-      draftConfig.maxHeight = Math.max(value, draftConfig.baseHeight + 40);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Continent Amp", 24, 120, 2, draftConfig.shape.continentAmplitude, (value) => {
-      draftConfig.shape.continentAmplitude = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Continent Freq", 0.0004, 0.0025, 0.00005, draftConfig.shape.continentFrequency, (value) => {
-      draftConfig.shape.continentFrequency = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Radial Falloff", 0.1, 1.2, 0.01, draftConfig.shape.radialFalloffStrength, (value) => {
-      draftConfig.shape.radialFalloffStrength = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Mountain Amp", 40, 220, 2, draftConfig.shape.mountainAmplitude, (value) => {
-      draftConfig.shape.mountainAmplitude = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Mountain Freq", 0.003, 0.02, 0.0005, draftConfig.shape.mountainFrequency, (value) => {
-      draftConfig.shape.mountainFrequency = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Hill Amp", 8, 80, 1, draftConfig.shape.hillAmplitude, (value) => {
-      draftConfig.shape.hillAmplitude = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Hill Freq", 0.002, 0.015, 0.0005, draftConfig.shape.hillFrequency, (value) => {
-      draftConfig.shape.hillFrequency = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Detail Amp", 0, 18, 0.5, draftConfig.shape.detailAmplitude, (value) => {
-      draftConfig.shape.detailAmplitude = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Detail Freq", 0.01, 0.08, 0.001, draftConfig.shape.detailFrequency, (value) => {
-      draftConfig.shape.detailFrequency = value;
-    }),
-  );
-  panel.appendChild(createDivider());
-  panel.appendChild(createSectionLabel("Erosion"));
-  panel.appendChild(
-    createCheckbox("Enable Erosion", draftConfig.erosion.enabled, (checked) => {
-      draftConfig.erosion.enabled = checked;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Erosion Grid", 65, 513, 32, draftConfig.erosion.resolution, (value) => {
-      draftConfig.erosion.resolution = clampErosionResolution(value);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Iterations", 0, 48, 1, draftConfig.erosion.iterations, (value) => {
-      draftConfig.erosion.iterations = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Talus Height", 0.25, 4, 0.05, draftConfig.erosion.talusHeight, (value) => {
-      draftConfig.erosion.talusHeight = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Smoothing", 0.02, 0.45, 0.01, draftConfig.erosion.smoothing, (value) => {
-      draftConfig.erosion.smoothing = value;
-    }),
-  );
-  panel.appendChild(createDivider());
-  panel.appendChild(createSectionLabel("Rivers"));
-  panel.appendChild(
-    createCheckbox("Enable Rivers", draftConfig.rivers.enabled, (checked) => {
-      draftConfig.rivers.enabled = checked;
-    }),
-  );
-  panel.appendChild(
-    createSlider("River Grid", 65, 513, 32, draftConfig.rivers.resolution, (value) => {
-      draftConfig.rivers.resolution = clampErosionResolution(value);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Flow Threshold", 0.45, 0.95, 0.01, draftConfig.rivers.flowThreshold, (value) => {
-      draftConfig.rivers.flowThreshold = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Bank Width", 0.2, 1, 0.02, draftConfig.rivers.bankStrength, (value) => {
-      draftConfig.rivers.bankStrength = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Lake Threshold", 0.2, 3, 0.05, draftConfig.rivers.lakeThreshold, (value) => {
-      draftConfig.rivers.lakeThreshold = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("River Depth", 0.2, 6, 0.1, draftConfig.rivers.depth, (value) => {
-      draftConfig.rivers.depth = Math.min(value, draftConfig.rivers.maxDepth);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Max Depth", 1, 14, 0.25, draftConfig.rivers.maxDepth, (value) => {
-      draftConfig.rivers.maxDepth = Math.max(value, draftConfig.rivers.depth);
-    }),
-  );
-  panel.appendChild(
-    createSlider("Min Slope", 0, 0.12, 0.002, draftConfig.rivers.minSlope, (value) => {
-      draftConfig.rivers.minSlope = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("Min Elevation", 0, 32, 1, draftConfig.rivers.minElevation, (value) => {
-      draftConfig.rivers.minElevation = value;
-    }),
-  );
-  panel.appendChild(createDivider());
-  panel.appendChild(createSectionLabel("POI"));
-  panel.appendChild(
-    createSlider("POI Density", 0.35, 3, 0.05, draftConfig.poi.density, (value) => {
-      draftConfig.poi.density = value;
-    }),
-  );
-  panel.appendChild(
-    createSlider("POI Spacing", 0.7, 1.8, 0.05, draftConfig.poi.spacing, (value) => {
-      draftConfig.poi.spacing = value;
-    }),
-  );
-  panel.appendChild(createDivider());
-  panel.appendChild(createActionButtons());
+  panel.appendChild(createWorldTabMount());
 }
 
 function renderPresetsTab(): void {
-  panel.appendChild(createSectionLabel("Presets"));
-  panel.appendChild(createPresetControls());
-  panel.appendChild(createActionButtons());
+  panel.appendChild(createPresetsTabMount());
 }
 
 function createTabBar(): HTMLElement {
@@ -899,120 +741,43 @@ function createTabBar(): HTMLElement {
   return wrap;
 }
 
-function createPresetControls(): HTMLElement {
+function createPresetsTabMount(): HTMLElement {
   const wrap = document.createElement("div");
-  wrap.style.display = "grid";
-  wrap.style.gap = "8px";
+  wrap.id = "react-presets-tab";
   wrap.style.marginTop = "8px";
-  wrap.style.width = "100%";
-  wrap.style.boxSizing = "border-box";
+  return wrap;
+}
 
-  const select = document.createElement("select");
-  select.style.width = "100%";
-  select.style.maxWidth = "100%";
-  select.style.padding = "6px 8px";
-  select.style.boxSizing = "border-box";
-  select.style.borderRadius = "8px";
-  select.style.border = "1px solid rgba(255,255,255,0.16)";
-  select.style.background = "rgba(14, 21, 29, 0.95)";
-  select.style.color = "#f4edc9";
+function createLeftPanelMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-left-panel";
+  return wrap;
+}
 
-  presetOptions.forEach((preset, index) => {
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.textContent = preset.name;
-    select.appendChild(option);
-  });
+function createFeaturePanelMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-feature-panel";
+  return wrap;
+}
 
-  const buttons = document.createElement("div");
-  buttons.style.display = "grid";
-  buttons.style.gridTemplateColumns = "1fr 1fr";
-  buttons.style.gap = "8px";
-  buttons.style.width = "100%";
-  buttons.style.boxSizing = "border-box";
+function createRuntimeTabMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-runtime-tab";
+  wrap.style.marginTop = "8px";
+  return wrap;
+}
 
-  const tools = document.createElement("div");
-  tools.style.display = "grid";
-  tools.style.gridTemplateColumns = "1fr 1fr";
-  tools.style.gap = "8px";
-  tools.style.width = "100%";
-  tools.style.boxSizing = "border-box";
+function createMaterialTabMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-material-tab";
+  wrap.style.marginTop = "8px";
+  return wrap;
+}
 
-  const importInput = document.createElement("input");
-  importInput.type = "file";
-  importInput.accept = "application/json,.json";
-  importInput.style.display = "none";
-  importInput.addEventListener("change", async () => {
-    const file = importInput.files?.[0];
-    importInput.value = "";
-    if (!file) {
-      return;
-    }
-
-    try {
-      const imported = parseImportedPresets(await file.text());
-      const merged = mergeImportedPresets(getSavedPresets(), imported);
-      savePresets(merged);
-      presetOptions = getPresetOptions();
-      renderPanel();
-      renderFeaturePanel();
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Failed to import presets.");
-    }
-  });
-
-  const apply = createButton("Apply Preset", () => {
-    const preset = presetOptions[Number(select.value)];
-    draftConfig = mergeDraftWithOverrides(buildDraftConfig(), preset.config);
-    if (preset.featureState) {
-      draftConfig.poiDebug = clonePoiDebugConfig(preset.featureState.poiDebug);
-      draftConfig.hidePoiMarkerMeshes = preset.featureState.hidePoiMarkerMeshes ?? draftConfig.hidePoiMarkerMeshes;
-      draftConfig.hidePoiLabels = preset.featureState.hidePoiLabels ?? draftConfig.hidePoiLabels;
-      draftConfig.showPoiFootprints = preset.featureState.showPoiFootprints ?? draftConfig.showPoiFootprints;
-    }
-    return applyDraftToWorld();
-  });
-
-  const save = createButton("Save Current", () => {
-    const name = window.prompt("Preset name", `Preset ${presetOptions.length - BUILTIN_PRESETS.length + 1}`);
-    if (!name) {
-      return;
-    }
-
-    const customPresets = getSavedPresets();
-    customPresets.push({
-      name,
-      config: buildTerrainOverridesFromDraft(),
-      featureState: {
-        poiDebug: clonePoiDebugConfig(draftConfig.poiDebug),
-        hidePoiMarkerMeshes: draftConfig.hidePoiMarkerMeshes,
-        hidePoiLabels: draftConfig.hidePoiLabels,
-        showPoiFootprints: draftConfig.showPoiFootprints,
-      },
-    });
-    savePresets(customPresets);
-    presetOptions = getPresetOptions();
-    renderPanel();
-    renderFeaturePanel();
-  });
-
-  const exportButton = createButton("Export JSON", () => {
-    const preset = presetOptions[Number(select.value)];
-    downloadJsonFile(`${slugifyPresetName(preset.name)}.json`, preset);
-  });
-
-  const importButton = createButton("Import JSON", () => {
-    importInput.click();
-  });
-
-  buttons.appendChild(apply);
-  buttons.appendChild(save);
-  tools.appendChild(exportButton);
-  tools.appendChild(importButton);
-  wrap.appendChild(select);
-  wrap.appendChild(buttons);
-  wrap.appendChild(tools);
-  wrap.appendChild(importInput);
+function createWorldTabMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-world-tab";
+  wrap.style.marginTop = "8px";
   return wrap;
 }
 
@@ -1151,54 +916,15 @@ function createPoiStatsRow(): HTMLElement {
   return row;
 }
 
-function createFeatureBuildStatus(): HTMLElement {
+function createFeatureBuildStatusMount(): HTMLElement {
   const row = document.createElement("div");
   row.style.marginTop = "8px";
-  row.style.padding = "6px 8px";
-  row.style.borderRadius = "8px";
-  row.style.background = "rgba(14, 21, 29, 0.95)";
-  row.style.border = "1px solid rgba(255,255,255,0.1)";
-  row.style.color = "#9cb3c3";
-  row.style.whiteSpace = "pre-wrap";
-  featureBuildStatusText = row;
-  updateFeatureBuildStatus();
+  row.id = "react-feature-build-status";
   return row;
 }
 
 function updateFeatureBuildStatus(): void {
-  if (!featureBuildStatusText) {
-    return;
-  }
-
-  const summary = draftConfig.features.poi
-    ? draftConfig.features.roads
-      ? "POI and roads will rebuild into the world."
-      : "POI will load on rebuild. Roads remain disabled."
-    : "POI and roads are excluded by default.";
-  const workerStatus = demo.getWorkerStatus();
-  const workerLine = workerStatus.workersEnabled
-    ? workerStatus.sharedSnapshotsEnabled
-      ? "Workers active. Shared snapshots enabled."
-      : "Workers active. Shared snapshots unavailable."
-    : "Workers unavailable. Main-thread fallback only.";
-  const workerDetail =
-    `crossOriginIsolated: ${workerStatus.crossOriginIsolated}\n` +
-    `SharedArrayBuffer: ${workerStatus.sharedArrayBufferDefined}\n` +
-    `Snapshot Mode: ${workerStatus.snapshotMode}\n` +
-    `Live Terrain Systems: ${workerStatus.liveTerrainSystems}\n` +
-    `Chunks: ${workerStatus.chunkCount}\n` +
-    `Loaded Chunk Meshes: ${workerStatus.loadedChunkMeshes}\n` +
-    `Mesh Apply: ${workerStatus.applyingChunkMeshes ? "active" : "idle"}\n` +
-    `Pending Chunk Meshes: ${workerStatus.pendingChunkMeshes}`;
-  const buildProfile = demo.getBuildProfile();
-  const profileDetail =
-    `\nWorld Build: ${formatDuration(buildProfile.lastWorldBuildMs)}\n` +
-    `Terrain Swap: ${formatDuration(buildProfile.lastTerrainSwapMs)}\n` +
-    `Chunk Workers: ${formatDuration(buildProfile.lastChunkWorkerBuildMs)}\n` +
-    `Mesh Apply: ${formatDuration(buildProfile.lastMeshApplyMs)}\n` +
-    `Total Rebuild: ${formatDuration(buildProfile.lastTotalRebuildMs)}`;
-  const progress = buildStatus.phase === "idle" ? "" : `\n${buildStatus.message}`;
-  featureBuildStatusText.textContent = `${summary}\n${workerLine}\n${workerDetail}${profileDetail}${progress}`;
+  renderFeatureStatus();
 }
 
 function createPoiDebugControls(): HTMLElement {
@@ -1516,6 +1242,34 @@ function clonePoiDebugConfig(
     showTags: config.showTags,
     kinds: { ...config.kinds },
     mineResources: { ...config.mineResources },
+  };
+}
+
+function clonePreset(preset: TerrainPreset): TerrainPreset {
+  return {
+    name: preset.name,
+    config: { ...preset.config },
+    featureState: preset.featureState
+      ? {
+          poiDebug: clonePoiDebugConfig(preset.featureState.poiDebug),
+          hidePoiMarkerMeshes: preset.featureState.hidePoiMarkerMeshes,
+          hidePoiLabels: preset.featureState.hidePoiLabels,
+          showPoiFootprints: preset.featureState.showPoiFootprints,
+        }
+      : undefined,
+  };
+}
+
+function buildPresetFromDraft(name: string): TerrainPreset {
+  return {
+    name,
+    config: buildTerrainOverridesFromDraft(),
+    featureState: {
+      poiDebug: clonePoiDebugConfig(draftConfig.poiDebug),
+      hidePoiMarkerMeshes: draftConfig.hidePoiMarkerMeshes,
+      hidePoiLabels: draftConfig.hidePoiLabels,
+      showPoiFootprints: draftConfig.showPoiFootprints,
+    },
   };
 }
 

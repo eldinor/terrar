@@ -11,9 +11,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@babylonjs/core": "8.54.3"
+    "@babylonjs/core": "8.54.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "vitest": "^3.2.4"

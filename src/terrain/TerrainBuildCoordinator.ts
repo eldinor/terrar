@@ -1,22 +1,11 @@
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { ProceduralGeneratorSnapshot } from "./ProceduralGenerator";
-import { PackedTerrainSnapshot, unpackTerrainSnapshot } from "./TerrainSnapshotLayout";
 import { TerrainConfig } from "./TerrainConfig";
 import {
   BuildWorldRequest,
-  SerializedWorldBuildData,
   WorldBuildWorkerResponse
 } from "./TerrainBuildMessages";
-import { TerrainPoi } from "./TerrainPoiPlanner";
-import { TerrainRoad } from "./TerrainRoadPlanner";
 import { buildSerializedWorldData } from "./TerrainWorldBuild";
-
-export interface TerrainPrebuiltWorldData {
-  readonly poiSites: readonly TerrainPoi[];
-  readonly roads: readonly TerrainRoad[];
-  readonly snapshot: ProceduralGeneratorSnapshot;
-  readonly packedSnapshot: PackedTerrainSnapshot;
-}
+import { BuiltTerrain } from "../builder";
+import { builtTerrainFromSerializedData } from "../builder/buildTerrain";
 
 export class TerrainBuildCoordinator {
   private readonly worker: Worker | null;
@@ -24,7 +13,8 @@ export class TerrainBuildCoordinator {
   private readonly pending = new Map<
     number,
     {
-      resolve: (value: TerrainPrebuiltWorldData) => void;
+      config: TerrainConfig;
+      resolve: (value: BuiltTerrain) => void;
       reject: (reason?: unknown) => void;
     }
   >();
@@ -48,12 +38,13 @@ export class TerrainBuildCoordinator {
     };
   }
 
-  async buildWorld(
+  async buildTerrain(
     config: TerrainConfig,
     buildVersion: number
-  ): Promise<TerrainPrebuiltWorldData> {
+  ): Promise<BuiltTerrain> {
     if (!this.worker) {
-      return deserializeWorldBuildData(
+      return builtTerrainFromSerializedData(
+        config,
         buildSerializedWorldData(config, this.preferSharedSnapshot)
       );
     }
@@ -65,8 +56,8 @@ export class TerrainBuildCoordinator {
       preferSharedSnapshot: this.preferSharedSnapshot
     };
 
-    return new Promise<TerrainPrebuiltWorldData>((resolve, reject) => {
-      this.pending.set(buildVersion, { resolve, reject });
+    return new Promise<BuiltTerrain>((resolve, reject) => {
+      this.pending.set(buildVersion, { config, resolve, reject });
       this.worker!.postMessage(request);
     });
   }
@@ -88,31 +79,11 @@ export class TerrainBuildCoordinator {
       return;
     }
 
-    pending.resolve(deserializeWorldBuildData(message.data));
+    pending.resolve(builtTerrainFromSerializedData(pending.config, message.data));
   }
 
   private rejectAll(error: Error): void {
     this.pending.forEach(({ reject }) => reject(error));
     this.pending.clear();
   }
-}
-
-function deserializeWorldBuildData(
-  data: SerializedWorldBuildData
-): TerrainPrebuiltWorldData {
-  return {
-    poiSites: data.poiSites.map((site) => ({
-      ...site,
-      tags: [...site.tags]
-    })),
-    roads: data.roads.map((road) => ({
-      id: road.id,
-      fromPoiId: road.fromPoiId,
-      toPoiId: road.toPoiId,
-      cost: road.cost,
-      points: road.points.map((point) => new Vector3(point.x, point.y, point.z))
-    })),
-    snapshot: unpackTerrainSnapshot(data.snapshot as PackedTerrainSnapshot),
-    packedSnapshot: data.snapshot as PackedTerrainSnapshot
-  };
 }

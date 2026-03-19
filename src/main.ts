@@ -14,9 +14,15 @@ import {
 import {
   TerrainChunkBuildCoordinator
 } from "./terrain/TerrainChunkBuildCoordinator";
+import { buildTerrain, BuiltTerrain } from "./builder";
+import {
+  BabylonTerrainAdapter,
+  renderBuiltTerrain
+} from "./adapters/babylon";
 import { TerrainPoi } from "./terrain/TerrainPoiPlanner";
 import { TerrainRoad } from "./terrain/TerrainRoadPlanner";
 import { TerrainSystem, TerrainSystemBuildOptions } from "./terrain/TerrainSystem";
+import { TerrainChunkBuildProfile } from "./terrain/TerrainChunkMeshRuntime";
 import { TerrainFoliageStats } from "./terrain/TerrainFoliageSystem";
 import {
   TerrainPoiDebugConfig,
@@ -24,7 +30,6 @@ import {
   TerrainPoiStats
 } from "./terrain/TerrainPoiSystem";
 import { TerrainRoadStats } from "./terrain/TerrainRoadSystem";
-import { TerrainChunkBuildProfile } from "./terrain/TerrainSystem";
 import {
   TerrainDebugViewMode,
   TerrainLayerThresholds,
@@ -188,16 +193,25 @@ export function createTerrainDemo(
     }
   });
 
-  let terrainSystem = new TerrainSystem(
-    scene,
-    overrides,
+  const createTerrainAdapter = (
+    terrain: BuiltTerrain,
+    nextTextureOptions: TerrainTextureOptions,
+    version: number
+  ): BabylonTerrainAdapter =>
+    renderBuiltTerrain(scene, terrain, {
+      textureOptions: nextTextureOptions,
+      buildOptions: createBuildOptions(version, camera.position.clone())
+    });
+
+  let terrain = buildTerrain(overrides, sharedSnapshotsEnabled);
+  let terrainAdapter = createTerrainAdapter(
+    terrain,
     textureOptions,
-    null,
-    createBuildOptions(buildVersion, camera.position.clone())
+    buildVersion
   );
-  frameCameraToWorld(camera, terrainSystem.getConfig());
-  terrainSystem.initialize();
-  void terrainSystem
+  frameCameraToWorld(camera, terrainAdapter.getConfig());
+  terrainAdapter.initialize();
+  void terrainAdapter
     .whenChunkMeshesReady()
     .then(() => {
       if (buildVersion === 0) {
@@ -220,11 +234,11 @@ export function createTerrainDemo(
         });
       }
     });
-  terrainSystem.update(camera.position);
+  terrainAdapter.update(camera.position);
 
   scene.onBeforeRenderObservable.add(() => {
-    terrainSystem.update(camera.position);
-    terrainSystem.updateDebugOverlay();
+    terrainAdapter.update(camera.position);
+    terrainAdapter.updateDebugOverlay();
   });
 
   engine.runRenderLoop(() => {
@@ -244,22 +258,22 @@ export function createTerrainDemo(
     nextTextureOptions: TerrainTextureOptions
   ): Promise<void> => {
     const rebuildStartedAt = performance.now();
-    const wireframe = terrainSystem.getWireframe();
-    const debugViewMode = terrainSystem.getDebugViewMode();
-    const terrainMaterialConfig = terrainSystem.getTerrainMaterialConfig();
-    const waterLevel = terrainSystem.getWaterLevel();
-    const waterConfig = terrainSystem.getWaterConfig();
-    const collisionRadius = terrainSystem.getCollisionRadius();
-    const foliageRadius = terrainSystem.getFoliageRadius();
-    const showFoliage = terrainSystem.getShowFoliage();
-    const showPoi = terrainSystem.getShowPoi();
-    const poiMarkerMeshesVisible = terrainSystem.getPoiMarkerMeshesVisible();
-    const poiLabelsVisible = terrainSystem.getPoiLabelsVisible();
-    const showPoiFootprints = terrainSystem.getShowPoiFootprints();
-    const poiDebugConfig = terrainSystem.getPoiDebugConfig();
-    const showRoads = terrainSystem.getShowRoads();
-    const lodDistances = terrainSystem.getLodDistances();
-    const currentConfig = terrainSystem.getConfig();
+    const wireframe = terrainAdapter.getWireframe();
+    const debugViewMode = terrainAdapter.getDebugViewMode();
+    const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
+    const waterLevel = terrainAdapter.getWaterLevel();
+    const waterConfig = terrainAdapter.getWaterConfig();
+    const collisionRadius = terrainAdapter.getCollisionRadius();
+    const foliageRadius = terrainAdapter.getFoliageRadius();
+    const showFoliage = terrainAdapter.getShowFoliage();
+    const showPoi = terrainAdapter.getShowPoi();
+    const poiMarkerMeshesVisible = terrainAdapter.getPoiMarkerMeshesVisible();
+    const poiLabelsVisible = terrainAdapter.getPoiLabelsVisible();
+    const showPoiFootprints = terrainAdapter.getShowPoiFootprints();
+    const poiDebugConfig = terrainAdapter.getPoiDebugConfig();
+    const showRoads = terrainAdapter.getShowRoads();
+    const lodDistances = terrainAdapter.getLodDistances();
+    const currentConfig = terrainAdapter.getConfig();
     const mergedOverrides: TerrainConfigOverrides = {
       ...currentConfig,
       ...nextConfigOverrides,
@@ -298,7 +312,7 @@ export function createTerrainDemo(
       total: 1
     });
     const worldBuildStartedAt = performance.now();
-    const prebuiltWorld = await buildCoordinator.buildWorld(
+    const nextTerrain = await buildCoordinator.buildTerrain(
       nextConfig,
       nextBuildVersion
     );
@@ -308,45 +322,44 @@ export function createTerrainDemo(
     }
 
     const terrainSwapStartedAt = performance.now();
-    terrainSystem.dispose();
+    terrainAdapter.dispose();
     frameCameraToWorld(camera, nextConfig);
-    terrainSystem = new TerrainSystem(
-      scene,
-      nextConfig,
+    terrain = nextTerrain;
+    terrainAdapter = createTerrainAdapter(
+      terrain,
       nextTextureOptions,
-      prebuiltWorld,
-      createBuildOptions(nextBuildVersion, camera.position.clone())
+      nextBuildVersion
     );
-    terrainSystem.initialize();
-    terrainSystem.setWireframe(wireframe);
-    terrainSystem.setCollisionRadius(
+    terrainAdapter.initialize();
+    terrainAdapter.setWireframe(wireframe);
+    terrainAdapter.setCollisionRadius(
       nextConfigOverrides.collisionRadius ?? collisionRadius
     );
-    terrainSystem.setFoliageRadius(
+    terrainAdapter.setFoliageRadius(
       nextConfigOverrides.foliageRadius ?? foliageRadius
     );
-    terrainSystem.setShowFoliage(nextShowFoliage);
-    terrainSystem.setShowPoi(showPoi);
-    terrainSystem.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
-    terrainSystem.setPoiLabelsVisible(poiLabelsVisible);
-    terrainSystem.setShowPoiFootprints(showPoiFootprints);
-    terrainSystem.setPoiDebugConfig(poiDebugConfig);
-    terrainSystem.setShowRoads(showRoads);
-    terrainSystem.setLodDistances(nextConfigOverrides.lodDistances ?? lodDistances);
-    terrainSystem.setWaterLevel(nextConfigOverrides.waterLevel ?? waterLevel);
-    terrainSystem.setTerrainMaterialConfig(terrainMaterialConfig);
-    terrainSystem.setWaterConfig(waterConfig);
-    terrainSystem.setDebugViewMode(debugViewMode);
-    terrainSystem.update(camera.position);
+    terrainAdapter.setShowFoliage(nextShowFoliage);
+    terrainAdapter.setShowPoi(showPoi);
+    terrainAdapter.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
+    terrainAdapter.setPoiLabelsVisible(poiLabelsVisible);
+    terrainAdapter.setShowPoiFootprints(showPoiFootprints);
+    terrainAdapter.setPoiDebugConfig(poiDebugConfig);
+    terrainAdapter.setShowRoads(showRoads);
+    terrainAdapter.setLodDistances(nextConfigOverrides.lodDistances ?? lodDistances);
+    terrainAdapter.setWaterLevel(nextConfigOverrides.waterLevel ?? waterLevel);
+    terrainAdapter.setTerrainMaterialConfig(terrainMaterialConfig);
+    terrainAdapter.setWaterConfig(waterConfig);
+    terrainAdapter.setDebugViewMode(debugViewMode);
+    terrainAdapter.update(camera.position);
     await Promise.all([
-      terrainSystem.whenChunkMeshesReady(),
-      terrainSystem.whenFoliageReady()
+      terrainAdapter.whenChunkMeshesReady(),
+      terrainAdapter.whenFoliageReady()
     ]);
     const terrainSwapDurationMs = performance.now() - terrainSwapStartedAt;
     if (nextBuildVersion !== buildVersion) {
       return;
     }
-    const chunkProfile: TerrainChunkBuildProfile = terrainSystem.getChunkBuildProfile();
+    const chunkProfile: TerrainChunkBuildProfile = terrainAdapter.getChunkBuildProfile();
     buildProfile = {
       lastWorldBuildMs: worldBuildDurationMs,
       lastTerrainSwapMs: terrainSwapDurationMs,
@@ -366,64 +379,64 @@ export function createTerrainDemo(
     engine,
     scene,
     camera,
-    getTerrainSystem: () => terrainSystem,
-    setWireframe: (enabled: boolean) => terrainSystem.setWireframe(enabled),
-    toggleDebugOverlay: () => terrainSystem.toggleDebugOverlay(),
-    setWaterLevel: (level: number) => terrainSystem.setWaterLevel(level),
-    getWaterLevel: () => terrainSystem.getWaterLevel(),
-    setWaterConfig: (config: TerrainWaterConfig) => terrainSystem.setWaterConfig(config),
-    getWaterConfig: () => terrainSystem.getWaterConfig(),
-    setCollisionRadius: (radius: number) => terrainSystem.setCollisionRadius(radius),
-    getCollisionRadius: () => terrainSystem.getCollisionRadius(),
-    setFoliageRadius: (radius: number) => terrainSystem.setFoliageRadius(radius),
-    getFoliageRadius: () => terrainSystem.getFoliageRadius(),
-    setShowFoliage: (enabled: boolean) => terrainSystem.setShowFoliage(enabled),
-    getShowFoliage: () => terrainSystem.getShowFoliage(),
-    setShowPoi: (enabled: boolean) => terrainSystem.setShowPoi(enabled),
-    getShowPoi: () => terrainSystem.getShowPoi(),
+    getTerrainSystem: () => terrainAdapter.getTerrainSystem(),
+    setWireframe: (enabled: boolean) => terrainAdapter.setWireframe(enabled),
+    toggleDebugOverlay: () => terrainAdapter.toggleDebugOverlay(),
+    setWaterLevel: (level: number) => terrainAdapter.setWaterLevel(level),
+    getWaterLevel: () => terrainAdapter.getWaterLevel(),
+    setWaterConfig: (config: TerrainWaterConfig) => terrainAdapter.setWaterConfig(config),
+    getWaterConfig: () => terrainAdapter.getWaterConfig(),
+    setCollisionRadius: (radius: number) => terrainAdapter.setCollisionRadius(radius),
+    getCollisionRadius: () => terrainAdapter.getCollisionRadius(),
+    setFoliageRadius: (radius: number) => terrainAdapter.setFoliageRadius(radius),
+    getFoliageRadius: () => terrainAdapter.getFoliageRadius(),
+    setShowFoliage: (enabled: boolean) => terrainAdapter.setShowFoliage(enabled),
+    getShowFoliage: () => terrainAdapter.getShowFoliage(),
+    setShowPoi: (enabled: boolean) => terrainAdapter.setShowPoi(enabled),
+    getShowPoi: () => terrainAdapter.getShowPoi(),
     setPoiMarkerMeshesVisible: (enabled: boolean) =>
-      terrainSystem.setPoiMarkerMeshesVisible(enabled),
-    getPoiMarkerMeshesVisible: () => terrainSystem.getPoiMarkerMeshesVisible(),
+      terrainAdapter.setPoiMarkerMeshesVisible(enabled),
+    getPoiMarkerMeshesVisible: () => terrainAdapter.getPoiMarkerMeshesVisible(),
     setPoiLabelsVisible: (enabled: boolean) =>
-      terrainSystem.setPoiLabelsVisible(enabled),
-    getPoiLabelsVisible: () => terrainSystem.getPoiLabelsVisible(),
+      terrainAdapter.setPoiLabelsVisible(enabled),
+    getPoiLabelsVisible: () => terrainAdapter.getPoiLabelsVisible(),
     setShowPoiFootprints: (enabled: boolean) =>
-      terrainSystem.setShowPoiFootprints(enabled),
-    getShowPoiFootprints: () => terrainSystem.getShowPoiFootprints(),
-    setShowRoads: (enabled: boolean) => terrainSystem.setShowRoads(enabled),
-    getShowRoads: () => terrainSystem.getShowRoads(),
+      terrainAdapter.setShowPoiFootprints(enabled),
+    getShowPoiFootprints: () => terrainAdapter.getShowPoiFootprints(),
+    setShowRoads: (enabled: boolean) => terrainAdapter.setShowRoads(enabled),
+    getShowRoads: () => terrainAdapter.getShowRoads(),
     setLodDistances: (distances: readonly [number, number, number]) =>
-      terrainSystem.setLodDistances(distances),
-    getLodDistances: () => terrainSystem.getLodDistances(),
+      terrainAdapter.setLodDistances(distances),
+    getLodDistances: () => terrainAdapter.getLodDistances(),
     setDebugViewMode: (mode: TerrainDebugViewMode) =>
-      terrainSystem.setDebugViewMode(mode),
-    getDebugViewMode: () => terrainSystem.getDebugViewMode(),
+      terrainAdapter.setDebugViewMode(mode),
+    getDebugViewMode: () => terrainAdapter.getDebugViewMode(),
     setTerrainMaterialConfig: (config: TerrainMaterialConfig) =>
-      terrainSystem.setTerrainMaterialConfig(config),
-    getTerrainMaterialConfig: () => terrainSystem.getTerrainMaterialConfig(),
+      terrainAdapter.setTerrainMaterialConfig(config),
+    getTerrainMaterialConfig: () => terrainAdapter.getTerrainMaterialConfig(),
     setTerrainMaterialThresholds: (thresholds: TerrainLayerThresholds) =>
-      terrainSystem.setTerrainMaterialThresholds(thresholds),
-    getTerrainMaterialThresholds: () => terrainSystem.getTerrainMaterialThresholds(),
+      terrainAdapter.setTerrainMaterialThresholds(thresholds),
+    getTerrainMaterialThresholds: () => terrainAdapter.getTerrainMaterialThresholds(),
     setUseGeneratedTextures: async (enabled: boolean) => {
       const nextTextureOptions = {
-        ...terrainSystem.getTextureOptions(),
+        ...terrainAdapter.getTextureOptions(),
         useGeneratedTextures: enabled
       };
-      await replaceTerrainSystem(terrainSystem.getConfig(), nextTextureOptions);
+      await replaceTerrainSystem(terrainAdapter.getConfig(), nextTextureOptions);
     },
-    getUseGeneratedTextures: () => terrainSystem.getTextureOptions().useGeneratedTextures,
+    getUseGeneratedTextures: () => terrainAdapter.getTextureOptions().useGeneratedTextures,
     rebuildTerrain: (nextOverrides: TerrainConfigOverrides) =>
-      replaceTerrainSystem(nextOverrides, terrainSystem.getTextureOptions()),
-    getTerrainConfig: () => terrainSystem.getConfig(),
-    getFoliageStats: () => terrainSystem.getFoliageStats(),
-    getPoiSites: () => terrainSystem.getPoiSites(),
-    getPoiStats: () => terrainSystem.getPoiStats(),
-    getPoiMeshStats: () => terrainSystem.getPoiMeshStats(),
+      replaceTerrainSystem(nextOverrides, terrainAdapter.getTextureOptions()),
+    getTerrainConfig: () => terrainAdapter.getConfig(),
+    getFoliageStats: () => terrainAdapter.getFoliageStats(),
+    getPoiSites: () => terrainAdapter.getPoiSites(),
+    getPoiStats: () => terrainAdapter.getPoiStats(),
+    getPoiMeshStats: () => terrainAdapter.getPoiMeshStats(),
     setPoiDebugConfig: (config: TerrainPoiDebugConfig) =>
-      terrainSystem.setPoiDebugConfig(config),
-    getPoiDebugConfig: () => terrainSystem.getPoiDebugConfig(),
-    getRoads: () => terrainSystem.getRoads(),
-    getRoadStats: () => terrainSystem.getRoadStats(),
+      terrainAdapter.setPoiDebugConfig(config),
+    getPoiDebugConfig: () => terrainAdapter.getPoiDebugConfig(),
+    getRoads: () => terrainAdapter.getRoads(),
+    getRoadStats: () => terrainAdapter.getRoadStats(),
     getBuildStatus: () => buildStatus,
     subscribeBuildStatus: (listener) => {
       buildStatusListeners.add(listener);
@@ -443,10 +456,10 @@ export function createTerrainDemo(
           ? "shared"
           : "copied",
       liveTerrainSystems: TerrainSystem.getLiveSystemCount(),
-      chunkCount: terrainSystem.getChunkCount(),
-      loadedChunkMeshes: terrainSystem.getLoadedChunkMeshCount(),
-      pendingChunkMeshes: terrainSystem.getPendingChunkMeshCount(),
-      applyingChunkMeshes: terrainSystem.isApplyingChunkMeshes()
+      chunkCount: terrainAdapter.getChunkCount(),
+      loadedChunkMeshes: terrainAdapter.getLoadedChunkMeshCount(),
+      pendingChunkMeshes: terrainAdapter.getPendingChunkMeshCount(),
+      applyingChunkMeshes: terrainAdapter.isApplyingChunkMeshes()
     }),
     getBuildProfile: () => ({ ...buildProfile })
   };

@@ -1,4 +1,3 @@
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { ProceduralGenerator } from "../ProceduralGenerator";
 import { PackedTerrainSnapshot, unpackTerrainSnapshot } from "../TerrainSnapshotLayout";
 import { TerrainChunkData } from "../TerrainChunkData";
@@ -122,7 +121,11 @@ function deserializeRoads(roads: readonly SerializedTerrainRoad[]): TerrainRoad[
     fromPoiId: road.fromPoiId,
     toPoiId: road.toPoiId,
     cost: road.cost,
-    points: road.points.map((point) => new Vector3(point.x, point.y, point.z))
+    points: road.points.map((point) => ({
+      x: point.x,
+      y: point.y,
+      z: point.z
+    }))
   }));
 }
 

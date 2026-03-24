@@ -13,6 +13,7 @@ import type {
   FeaturePanelState,
 } from "../src/demo/demoSnapshots";
 import type { TerrainDemo, TerrainBuildStatus } from "../src/demo/createTerrainDemo";
+import type { RenderSuspendToken } from "../src/adapters/babylon";
 
 class FakeElement {
   id = "";
@@ -141,6 +142,10 @@ const defaultBuildProfile = {
   lastTotalRebuildMs: 28,
 } as const;
 
+const noopSuspendToken: RenderSuspendToken = {
+  dispose(): void {},
+};
+
 function createTerrainDemoStub(): DemoStub {
   let config: BuiltTerrainConfig = {
     ...DEFAULT_BUILT_TERRAIN_CONFIG,
@@ -182,6 +187,10 @@ function createTerrainDemoStub(): DemoStub {
     engine: {} as TerrainDemo["engine"],
     scene: {} as TerrainDemo["scene"],
     camera: {} as TerrainDemo["camera"],
+    beginRendering: vi.fn(),
+    stopRendering: vi.fn(),
+    suspendRendering: vi.fn(() => noopSuspendToken),
+    markSceneMutated: vi.fn(),
     setWireframe: vi.fn(),
     toggleDebugOverlay: vi.fn(async () => true),
     setWaterLevel: vi.fn((level: number) => {
@@ -332,10 +341,12 @@ describe("demo bridge", () => {
   it("publishes snapshots and updates the active tab", async () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
 
     let notifications = 0;
     const unsubscribe = bridgeModule.subscribe(() => {
@@ -359,10 +370,12 @@ describe("demo bridge", () => {
   it("updates feature state through the bridge without leaking Babylon state into React", async () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
 
     const nextState: FeaturePanelState = {
       ...bridgeModule.getFeaturePanelState(),
@@ -393,10 +406,12 @@ describe("demo bridge", () => {
   it("reflects build status changes in the bridge snapshot", async () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
 
     demo.emitBuildStatus({
       phase: "chunks",
@@ -413,10 +428,12 @@ describe("demo bridge", () => {
   it("returns the same snapshot reference until the bridge publishes a new one", async () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
 
     const firstSnapshot = bridgeModule.getSnapshot();
     const secondSnapshot = bridgeModule.getSnapshot();

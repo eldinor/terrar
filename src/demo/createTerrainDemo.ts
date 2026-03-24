@@ -20,6 +20,8 @@ import {
   BabylonTerrainPoiMeshStats,
   BabylonTerrainPoiStats,
   BabylonTerrainRoadStats,
+  createRenderController,
+  RenderSuspendToken,
   BabylonTerrainTextureOptions,
   BabylonTerrainWaterConfig,
   renderBuiltTerrain
@@ -35,6 +37,10 @@ export interface TerrainDemo {
   readonly engine: Engine;
   readonly scene: Scene;
   readonly camera: ArcRotateCamera;
+  readonly beginRendering: () => void;
+  readonly stopRendering: () => void;
+  readonly suspendRendering: () => RenderSuspendToken;
+  readonly markSceneMutated: () => void;
   readonly setWireframe: (enabled: boolean) => void;
   readonly toggleDebugOverlay: () => Promise<boolean>;
   readonly setWaterLevel: (level: number) => void;
@@ -113,10 +119,38 @@ export interface TerrainBuildProfile {
   readonly lastTotalRebuildMs: number;
 }
 
+export interface TerrainDemoRenderPolicyContext {
+  readonly buildStatus: TerrainBuildStatus;
+  readonly camera: ArcRotateCamera;
+  readonly scene: Scene;
+}
+
+export interface TerrainDemoRenderPolicy {
+  readonly forceReadyFrame?: boolean;
+  readonly idleTimeoutMs?: number;
+  readonly shouldRender?: (context: TerrainDemoRenderPolicyContext) => boolean;
+}
+
+export interface TerrainDemoOptions {
+  readonly renderPolicy?: TerrainDemoRenderPolicy;
+}
+
+export const DEFAULT_DEMO_RENDER_POLICY: TerrainDemoRenderPolicy = {
+  idleTimeoutMs: 250,
+  forceReadyFrame: true
+};
+
+export function resolveTerrainDemoRenderPolicy(
+  renderPolicy?: TerrainDemoRenderPolicy
+): TerrainDemoRenderPolicy {
+  return renderPolicy ?? DEFAULT_DEMO_RENDER_POLICY;
+}
+
 export function createTerrainDemo(
   canvas: HTMLCanvasElement,
   overrides: BuiltTerrainConfigOverrides = {},
-  textureOptions: BabylonTerrainTextureOptions = {}
+  textureOptions: BabylonTerrainTextureOptions = {},
+  options: TerrainDemoOptions = {}
 ): TerrainDemo {
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
@@ -143,6 +177,7 @@ export function createTerrainDemo(
     sharedArrayBufferDefined && crossOriginIsolated;
   const buildCoordinator = new TerrainBuildCoordinator(sharedSnapshotsEnabled);
   const chunkBuildCoordinator = new TerrainChunkBuildCoordinator();
+  let lastCameraState = captureCameraState(camera);
   let buildVersion = 0;
   let buildStatus: TerrainBuildStatus = {
     phase: "idle",
@@ -157,6 +192,13 @@ export function createTerrainDemo(
     lastMeshApplyMs: 0,
     lastTotalRebuildMs: 0
   };
+  const renderPolicy = resolveTerrainDemoRenderPolicy(options.renderPolicy);
+  const renderActivityState = {
+    awaitingChunkMeshes: false,
+    awaitingFoliage: false,
+    togglingDebugOverlay: false
+  };
+  let renderController!: ReturnType<typeof createRenderController>;
   const buildStatusListeners = new Set<(status: TerrainBuildStatus) => void>();
 
   const setBuildStatus = (status: TerrainBuildStatus): void => {
@@ -195,6 +237,49 @@ export function createTerrainDemo(
       buildOptions: createBuildOptions(version, camera.position.clone())
     });
 
+  const trackAdapterActivity = (
+    adapter: BabylonTerrainAdapter,
+    version: number
+  ): void => {
+    renderActivityState.awaitingChunkMeshes = true;
+    renderActivityState.awaitingFoliage = true;
+
+    void adapter.whenChunkMeshesReady()
+      .catch((error) => {
+        console.error(error);
+      })
+      .finally(() => {
+        if (version !== buildVersion) {
+          return;
+        }
+        renderActivityState.awaitingChunkMeshes = false;
+        renderController.markSceneMutated();
+      });
+
+    void adapter.whenFoliageReady()
+      .catch((error) => {
+        console.error(error);
+      })
+      .finally(() => {
+        if (version !== buildVersion) {
+          return;
+        }
+        renderActivityState.awaitingFoliage = false;
+        renderController.markSceneMutated();
+      });
+  };
+
+  const shouldRenderForAsyncSceneWork = (): boolean => {
+    return (
+      buildStatus.phase !== "idle" ||
+      renderActivityState.awaitingChunkMeshes ||
+      renderActivityState.awaitingFoliage ||
+      renderActivityState.togglingDebugOverlay ||
+      terrainAdapter.isApplyingChunkMeshes() ||
+      terrainAdapter.getPendingChunkMeshCount() > 0
+    );
+  };
+
   let terrain = buildTerrain(overrides, sharedSnapshotsEnabled);
   let terrainAdapter = createTerrainAdapter(
     terrain,
@@ -227,185 +312,251 @@ export function createTerrainDemo(
       }
     });
   terrainAdapter.update(camera.position);
+  renderController = createRenderController(engine, {
+    forceReadyFrame: renderPolicy.forceReadyFrame,
+    idleTimeoutMs: renderPolicy.idleTimeoutMs,
+    renderFrame: () => {
+      terrainAdapter.update(camera.position);
+      terrainAdapter.updateDebugOverlay();
+      scene.render();
 
-  scene.onBeforeRenderObservable.add(() => {
-    terrainAdapter.update(camera.position);
-    terrainAdapter.updateDebugOverlay();
+      const nextCameraState = captureCameraState(camera);
+      if (hasCameraStateChanged(lastCameraState, nextCameraState)) {
+        renderController.markSceneMutated();
+      }
+      lastCameraState = nextCameraState;
+    },
+    shouldRender: () =>
+      shouldRenderForAsyncSceneWork() ||
+      (renderPolicy.shouldRender?.({
+        buildStatus,
+        camera,
+        scene
+      }) ?? false)
   });
+  trackAdapterActivity(terrainAdapter, buildVersion);
+  renderController.markSceneMutated();
 
-  engine.runRenderLoop(() => {
-    scene.render();
-  });
+  const beginInteractiveRendering = (): void => {
+    renderController.markSceneMutated();
+  };
 
   window.addEventListener("resize", () => {
     engine.resize();
+    beginInteractiveRendering();
   });
   window.addEventListener("beforeunload", () => {
     buildCoordinator.dispose();
     chunkBuildCoordinator.dispose();
   });
+  canvas.addEventListener("pointerdown", beginInteractiveRendering);
+  canvas.addEventListener("pointermove", beginInteractiveRendering);
+  canvas.addEventListener("pointerup", beginInteractiveRendering);
+  canvas.addEventListener("wheel", beginInteractiveRendering, { passive: true });
+  canvas.addEventListener("touchstart", beginInteractiveRendering, { passive: true });
+  canvas.addEventListener("touchmove", beginInteractiveRendering, { passive: true });
+  window.addEventListener("keydown", beginInteractiveRendering);
 
   const replaceTerrainSystem = async (
     nextConfigOverrides: BuiltTerrainConfigOverrides,
     nextTextureOptions: BabylonTerrainTextureOptions
   ): Promise<void> => {
+    const renderSuspendToken = renderController.suspendRendering();
     const rebuildStartedAt = performance.now();
-    const wireframe = terrainAdapter.getWireframe();
-    const debugViewMode = terrainAdapter.getDebugViewMode();
-    const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
-    const waterLevel = terrainAdapter.getWaterLevel();
-    const waterConfig = terrainAdapter.getWaterConfig();
-    const collisionRadius = terrainAdapter.getCollisionRadius();
-    const foliageRadius = terrainAdapter.getFoliageRadius();
-    const showFoliage = terrainAdapter.getShowFoliage();
-    const showPoi = terrainAdapter.getShowPoi();
-    const poiMarkerMeshesVisible = terrainAdapter.getPoiMarkerMeshesVisible();
-    const poiLabelsVisible = terrainAdapter.getPoiLabelsVisible();
-    const showPoiFootprints = terrainAdapter.getShowPoiFootprints();
-    const poiDebugConfig = terrainAdapter.getPoiDebugConfig();
-    const showRoads = terrainAdapter.getShowRoads();
-    const lodDistances = terrainAdapter.getLodDistances();
-    const currentConfig = terrainAdapter.getConfig();
-    const nextConfig = resolveBuiltTerrainConfig({
-      ...currentConfig,
-      ...nextConfigOverrides,
-      erosion: {
-        ...currentConfig.erosion,
-        ...nextConfigOverrides.erosion
-      },
-      features: {
-        ...currentConfig.features,
-        ...nextConfigOverrides.features
-      },
-      poi: {
-        ...currentConfig.poi,
-        ...nextConfigOverrides.poi
-      },
-      rivers: {
-        ...currentConfig.rivers,
-        ...nextConfigOverrides.rivers
-      },
-      shape: {
-        ...currentConfig.shape,
-        ...nextConfigOverrides.shape
+    try {
+      const wireframe = terrainAdapter.getWireframe();
+      const debugViewMode = terrainAdapter.getDebugViewMode();
+      const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
+      const waterLevel = terrainAdapter.getWaterLevel();
+      const waterConfig = terrainAdapter.getWaterConfig();
+      const collisionRadius = terrainAdapter.getCollisionRadius();
+      const foliageRadius = terrainAdapter.getFoliageRadius();
+      const showFoliage = terrainAdapter.getShowFoliage();
+      const showPoi = terrainAdapter.getShowPoi();
+      const poiMarkerMeshesVisible = terrainAdapter.getPoiMarkerMeshesVisible();
+      const poiLabelsVisible = terrainAdapter.getPoiLabelsVisible();
+      const showPoiFootprints = terrainAdapter.getShowPoiFootprints();
+      const poiDebugConfig = terrainAdapter.getPoiDebugConfig();
+      const showRoads = terrainAdapter.getShowRoads();
+      const lodDistances = terrainAdapter.getLodDistances();
+      const currentConfig = terrainAdapter.getConfig();
+      const nextConfig = resolveBuiltTerrainConfig({
+        ...currentConfig,
+        ...nextConfigOverrides,
+        erosion: {
+          ...currentConfig.erosion,
+          ...nextConfigOverrides.erosion
+        },
+        features: {
+          ...currentConfig.features,
+          ...nextConfigOverrides.features
+        },
+        poi: {
+          ...currentConfig.poi,
+          ...nextConfigOverrides.poi
+        },
+        rivers: {
+          ...currentConfig.rivers,
+          ...nextConfigOverrides.rivers
+        },
+        shape: {
+          ...currentConfig.shape,
+          ...nextConfigOverrides.shape
+        }
+      });
+      const nextShowFoliage =
+        nextConfig.buildFoliage &&
+        (nextConfigOverrides.buildFoliage === true || showFoliage);
+      const nextBuildVersion = ++buildVersion;
+      setBuildStatus({
+        phase: "world",
+        message: nextConfig.features.poi
+          ? "Building world features"
+          : "Preparing terrain rebuild",
+        completed: 0,
+        total: 1
+      });
+      const worldBuildStartedAt = performance.now();
+      const nextTerrain = await buildCoordinator.buildTerrain(
+        nextConfig,
+        nextBuildVersion
+      );
+      const worldBuildDurationMs = performance.now() - worldBuildStartedAt;
+      if (nextBuildVersion !== buildVersion) {
+        return;
       }
-    });
-    const nextShowFoliage =
-      nextConfig.buildFoliage &&
-      (nextConfigOverrides.buildFoliage === true || showFoliage);
-    const nextBuildVersion = ++buildVersion;
-    setBuildStatus({
-      phase: "world",
-      message: nextConfig.features.poi
-        ? "Building world features"
-        : "Preparing terrain rebuild",
-      completed: 0,
-      total: 1
-    });
-    const worldBuildStartedAt = performance.now();
-    const nextTerrain = await buildCoordinator.buildTerrain(
-      nextConfig,
-      nextBuildVersion
-    );
-    const worldBuildDurationMs = performance.now() - worldBuildStartedAt;
-    if (nextBuildVersion !== buildVersion) {
-      return;
-    }
 
-    const terrainSwapStartedAt = performance.now();
-    terrainAdapter.dispose();
-    frameCameraToWorld(camera, nextConfig);
-    terrain = nextTerrain;
-    terrainAdapter = createTerrainAdapter(
-      terrain,
-      nextTextureOptions,
-      nextBuildVersion
-    );
-    terrainAdapter.initialize();
-    terrainAdapter.setWireframe(wireframe);
-    terrainAdapter.setCollisionRadius(
-      nextConfigOverrides.collisionRadius ?? collisionRadius
-    );
-    terrainAdapter.setFoliageRadius(
-      nextConfigOverrides.foliageRadius ?? foliageRadius
-    );
-    terrainAdapter.setShowFoliage(nextShowFoliage);
-    terrainAdapter.setShowPoi(showPoi);
-    terrainAdapter.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
-    terrainAdapter.setPoiLabelsVisible(poiLabelsVisible);
-    terrainAdapter.setShowPoiFootprints(showPoiFootprints);
-    terrainAdapter.setPoiDebugConfig(poiDebugConfig);
-    terrainAdapter.setShowRoads(showRoads);
-    terrainAdapter.setLodDistances(nextConfigOverrides.lodDistances ?? lodDistances);
-    terrainAdapter.setWaterLevel(nextConfigOverrides.waterLevel ?? waterLevel);
-    terrainAdapter.setTerrainMaterialConfig(terrainMaterialConfig);
-    terrainAdapter.setWaterConfig(waterConfig);
-    terrainAdapter.setDebugViewMode(debugViewMode);
-    terrainAdapter.update(camera.position);
-    await Promise.all([
-      terrainAdapter.whenChunkMeshesReady(),
-      terrainAdapter.whenFoliageReady()
-    ]);
-    const terrainSwapDurationMs = performance.now() - terrainSwapStartedAt;
-    if (nextBuildVersion !== buildVersion) {
-      return;
+      const terrainSwapStartedAt = performance.now();
+      terrainAdapter.dispose();
+      frameCameraToWorld(camera, nextConfig);
+      terrain = nextTerrain;
+      terrainAdapter = createTerrainAdapter(
+        terrain,
+        nextTextureOptions,
+        nextBuildVersion
+      );
+      terrainAdapter.initialize();
+      trackAdapterActivity(terrainAdapter, nextBuildVersion);
+      terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setCollisionRadius(
+        nextConfigOverrides.collisionRadius ?? collisionRadius
+      );
+      terrainAdapter.setFoliageRadius(
+        nextConfigOverrides.foliageRadius ?? foliageRadius
+      );
+      terrainAdapter.setShowFoliage(nextShowFoliage);
+      terrainAdapter.setShowPoi(showPoi);
+      terrainAdapter.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
+      terrainAdapter.setPoiLabelsVisible(poiLabelsVisible);
+      terrainAdapter.setShowPoiFootprints(showPoiFootprints);
+      terrainAdapter.setPoiDebugConfig(poiDebugConfig);
+      terrainAdapter.setShowRoads(showRoads);
+      terrainAdapter.setLodDistances(nextConfigOverrides.lodDistances ?? lodDistances);
+      terrainAdapter.setWaterLevel(nextConfigOverrides.waterLevel ?? waterLevel);
+      terrainAdapter.setTerrainMaterialConfig(terrainMaterialConfig);
+      terrainAdapter.setWaterConfig(waterConfig);
+      terrainAdapter.setDebugViewMode(debugViewMode);
+      terrainAdapter.update(camera.position);
+      await Promise.all([
+        terrainAdapter.whenChunkMeshesReady(),
+        terrainAdapter.whenFoliageReady()
+      ]);
+      const terrainSwapDurationMs = performance.now() - terrainSwapStartedAt;
+      if (nextBuildVersion !== buildVersion) {
+        return;
+      }
+      const chunkProfile: TerrainChunkBuildProfile = terrainAdapter.getChunkBuildProfile();
+      buildProfile = {
+        lastWorldBuildMs: worldBuildDurationMs,
+        lastTerrainSwapMs: terrainSwapDurationMs,
+        lastChunkWorkerBuildMs: chunkProfile.workerBuildMs,
+        lastMeshApplyMs: chunkProfile.meshApplyMs,
+        lastTotalRebuildMs: performance.now() - rebuildStartedAt
+      };
+      setBuildStatus({
+        phase: "idle",
+        message: "",
+        completed: 0,
+        total: 0
+      });
+      lastCameraState = captureCameraState(camera);
+      renderController.markSceneMutated();
+    } finally {
+      renderSuspendToken.dispose();
     }
-    const chunkProfile: TerrainChunkBuildProfile = terrainAdapter.getChunkBuildProfile();
-    buildProfile = {
-      lastWorldBuildMs: worldBuildDurationMs,
-      lastTerrainSwapMs: terrainSwapDurationMs,
-      lastChunkWorkerBuildMs: chunkProfile.workerBuildMs,
-      lastMeshApplyMs: chunkProfile.meshApplyMs,
-      lastTotalRebuildMs: performance.now() - rebuildStartedAt
+  };
+
+  const mutateScene = <Args extends readonly unknown[]>(
+    mutate: (...args: Args) => void
+  ): ((...args: Args) => void) => {
+    return (...args: Args): void => {
+      mutate(...args);
+      renderController.markSceneMutated();
     };
-    setBuildStatus({
-      phase: "idle",
-      message: "",
-      completed: 0,
-      total: 0
-    });
   };
 
   return {
     engine,
     scene,
     camera,
-    setWireframe: (enabled: boolean) => terrainAdapter.setWireframe(enabled),
-    toggleDebugOverlay: () => terrainAdapter.toggleDebugOverlay(),
-    setWaterLevel: (level: number) => terrainAdapter.setWaterLevel(level),
+    beginRendering: () => renderController.beginRendering(),
+    stopRendering: () => renderController.stopRendering(),
+    suspendRendering: () => renderController.suspendRendering(),
+    markSceneMutated: () => renderController.markSceneMutated(),
+    setWireframe: mutateScene((enabled: boolean) => terrainAdapter.setWireframe(enabled)),
+    toggleDebugOverlay: async () => {
+      renderActivityState.togglingDebugOverlay = true;
+      renderController.markSceneMutated();
+      try {
+        const visible = await terrainAdapter.toggleDebugOverlay();
+        renderController.markSceneMutated();
+        return visible;
+      } finally {
+        renderActivityState.togglingDebugOverlay = false;
+        renderController.markSceneMutated();
+      }
+    },
+    setWaterLevel: mutateScene((level: number) => terrainAdapter.setWaterLevel(level)),
     getWaterLevel: () => terrainAdapter.getWaterLevel(),
-    setWaterConfig: (config: BabylonTerrainWaterConfig) => terrainAdapter.setWaterConfig(config),
+    setWaterConfig: mutateScene((config: BabylonTerrainWaterConfig) => terrainAdapter.setWaterConfig(config)),
     getWaterConfig: () => terrainAdapter.getWaterConfig(),
-    setCollisionRadius: (radius: number) => terrainAdapter.setCollisionRadius(radius),
+    setCollisionRadius: mutateScene((radius: number) => terrainAdapter.setCollisionRadius(radius)),
     getCollisionRadius: () => terrainAdapter.getCollisionRadius(),
-    setFoliageRadius: (radius: number) => terrainAdapter.setFoliageRadius(radius),
+    setFoliageRadius: mutateScene((radius: number) => terrainAdapter.setFoliageRadius(radius)),
     getFoliageRadius: () => terrainAdapter.getFoliageRadius(),
-    setShowFoliage: (enabled: boolean) => terrainAdapter.setShowFoliage(enabled),
+    setShowFoliage: mutateScene((enabled: boolean) => terrainAdapter.setShowFoliage(enabled)),
     getShowFoliage: () => terrainAdapter.getShowFoliage(),
-    setShowPoi: (enabled: boolean) => terrainAdapter.setShowPoi(enabled),
+    setShowPoi: mutateScene((enabled: boolean) => terrainAdapter.setShowPoi(enabled)),
     getShowPoi: () => terrainAdapter.getShowPoi(),
-    setPoiMarkerMeshesVisible: (enabled: boolean) =>
+    setPoiMarkerMeshesVisible: mutateScene((enabled: boolean) =>
       terrainAdapter.setPoiMarkerMeshesVisible(enabled),
+    ),
     getPoiMarkerMeshesVisible: () => terrainAdapter.getPoiMarkerMeshesVisible(),
-    setPoiLabelsVisible: (enabled: boolean) =>
+    setPoiLabelsVisible: mutateScene((enabled: boolean) =>
       terrainAdapter.setPoiLabelsVisible(enabled),
+    ),
     getPoiLabelsVisible: () => terrainAdapter.getPoiLabelsVisible(),
-    setShowPoiFootprints: (enabled: boolean) =>
+    setShowPoiFootprints: mutateScene((enabled: boolean) =>
       terrainAdapter.setShowPoiFootprints(enabled),
+    ),
     getShowPoiFootprints: () => terrainAdapter.getShowPoiFootprints(),
-    setShowRoads: (enabled: boolean) => terrainAdapter.setShowRoads(enabled),
+    setShowRoads: mutateScene((enabled: boolean) => terrainAdapter.setShowRoads(enabled)),
     getShowRoads: () => terrainAdapter.getShowRoads(),
-    setLodDistances: (distances: readonly [number, number, number]) =>
+    setLodDistances: mutateScene((distances: readonly [number, number, number]) =>
       terrainAdapter.setLodDistances(distances),
+    ),
     getLodDistances: () => terrainAdapter.getLodDistances(),
-    setDebugViewMode: (mode: BabylonTerrainDebugViewMode) =>
+    setDebugViewMode: mutateScene((mode: BabylonTerrainDebugViewMode) =>
       terrainAdapter.setDebugViewMode(mode),
+    ),
     getDebugViewMode: () => terrainAdapter.getDebugViewMode(),
-    setTerrainMaterialConfig: (config: BabylonTerrainMaterialConfig) =>
+    setTerrainMaterialConfig: mutateScene((config: BabylonTerrainMaterialConfig) =>
       terrainAdapter.setTerrainMaterialConfig(config),
+    ),
     getTerrainMaterialConfig: () => terrainAdapter.getTerrainMaterialConfig(),
-    setTerrainMaterialThresholds: (thresholds: BabylonTerrainLayerThresholds) =>
+    setTerrainMaterialThresholds: mutateScene((thresholds: BabylonTerrainLayerThresholds) =>
       terrainAdapter.setTerrainMaterialThresholds(thresholds),
+    ),
     getTerrainMaterialThresholds: () => terrainAdapter.getTerrainMaterialThresholds(),
     setUseGeneratedTextures: async (enabled: boolean) => {
       const nextTextureOptions = {
@@ -422,8 +573,9 @@ export function createTerrainDemo(
     getPoiSites: () => terrainAdapter.getPoiSites(),
     getPoiStats: () => terrainAdapter.getPoiStats(),
     getPoiMeshStats: () => terrainAdapter.getPoiMeshStats(),
-    setPoiDebugConfig: (config: BabylonTerrainPoiDebugConfig) =>
+    setPoiDebugConfig: mutateScene((config: BabylonTerrainPoiDebugConfig) =>
       terrainAdapter.setPoiDebugConfig(config),
+    ),
     getPoiDebugConfig: () => terrainAdapter.getPoiDebugConfig(),
     getRoads: () => terrainAdapter.getRoads(),
     getRoadStats: () => terrainAdapter.getRoadStats(),
@@ -464,4 +616,35 @@ function frameCameraToWorld(
   camera.upperRadiusLimit = Math.max(config.worldSize * 2.4, baseRadius + 200);
   camera.target = new Vector3(0, Math.max(config.baseHeight + 50, 24), 0);
   camera.radius = Math.max(camera.radius, baseRadius);
+}
+
+interface CameraStateSnapshot {
+  readonly alpha: number;
+  readonly beta: number;
+  readonly radius: number;
+  readonly position: Vector3;
+  readonly target: Vector3;
+}
+
+function captureCameraState(camera: ArcRotateCamera): CameraStateSnapshot {
+  return {
+    alpha: camera.alpha,
+    beta: camera.beta,
+    radius: camera.radius,
+    position: camera.position.clone(),
+    target: camera.target.clone()
+  };
+}
+
+function hasCameraStateChanged(
+  previous: CameraStateSnapshot,
+  next: CameraStateSnapshot
+): boolean {
+  return (
+    previous.alpha !== next.alpha ||
+    previous.beta !== next.beta ||
+    previous.radius !== next.radius ||
+    !previous.position.equals(next.position) ||
+    !previous.target.equals(next.target)
+  );
 }

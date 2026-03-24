@@ -1,14 +1,19 @@
 import { Scalar } from "@babylonjs/core/Maths/math.scalar";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { ProceduralGenerator } from "./ProceduralGenerator";
 import { TerrainConfig } from "./TerrainConfig";
 import { TerrainPoi, TerrainPoiKind } from "./TerrainPoiPlanner";
+
+export interface TerrainPoint3 {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
 
 export interface TerrainRoad {
   readonly id: string;
   readonly fromPoiId: string;
   readonly toPoiId: string;
-  readonly points: readonly Vector3[];
+  readonly points: readonly TerrainPoint3[];
   readonly cost: number;
 }
 
@@ -108,7 +113,7 @@ export class TerrainRoadPlanner {
   private routeBetweenPois(
     from: TerrainPoi,
     to: TerrainPoi
-  ): { points: Vector3[]; cost: number } | null {
+  ): { points: TerrainPoint3[]; cost: number } | null {
     const start = this.toGridNode(from.x, from.z);
     const goal = this.toGridNode(to.x, to.z);
     const open = new MinPriorityQueue();
@@ -192,7 +197,7 @@ export class TerrainRoadPlanner {
     fromPoi: TerrainPoi,
     toPoi: TerrainPoi,
     cost: number
-  ): { points: Vector3[]; cost: number } {
+  ): { points: TerrainPoint3[]; cost: number } {
     const path: GridNode[] = [];
     let currentIndex = endIndex;
     while (currentIndex >= 0) {
@@ -204,7 +209,7 @@ export class TerrainRoadPlanner {
     const points = path.map((node) => {
       const world = this.toWorld(node);
       const sample = this.generator.sample(world.x, world.z);
-      return new Vector3(world.x, sample.height + 3.2, world.z);
+      return { x: world.x, y: sample.height + 3.2, z: world.z };
     });
     const approachedPoints = applyPoiApproachPoints(
       points,
@@ -359,7 +364,7 @@ function smoothStep(min: number, max: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function simplifyRoadPoints(points: readonly Vector3[]): Vector3[] {
+function simplifyRoadPoints(points: readonly TerrainPoint3[]): TerrainPoint3[] {
   if (points.length <= 2) {
     return [...points];
   }
@@ -383,11 +388,11 @@ function simplifyRoadPoints(points: readonly Vector3[]): Vector3[] {
 }
 
 function smoothRoadPoints(
-  points: readonly Vector3[],
+  points: readonly TerrainPoint3[],
   generator: ProceduralGenerator,
   fromPoi: TerrainPoi,
   toPoi: TerrainPoi
-): Vector3[] {
+): TerrainPoint3[] {
   if (points.length <= 2) {
     return [...points];
   }
@@ -396,36 +401,36 @@ function smoothRoadPoints(
   const passes = Math.min(2, Math.max(1, Math.floor(points.length / 6)));
 
   for (let pass = 0; pass < passes; pass += 1) {
-    const next: Vector3[] = [smoothed[0].clone()];
+    const next: TerrainPoint3[] = [{ ...smoothed[0] }];
 
     for (let index = 1; index < smoothed.length - 1; index += 1) {
       const previous = smoothed[index - 1];
       const current = smoothed[index];
       const following = smoothed[index + 1];
-      const before = Vector3.Lerp(previous, current, 0.78);
-      const after = Vector3.Lerp(current, following, 0.22);
+      const before = lerpPoint(previous, current, 0.78);
+      const after = lerpPoint(current, following, 0.22);
 
       next.push(clampRoadPointToSurface(before, generator));
       next.push(clampRoadPointToSurface(after, generator));
     }
 
-    next.push(smoothed[smoothed.length - 1].clone());
+    next.push({ ...smoothed[smoothed.length - 1] });
     smoothed = simplifyRoadPoints(next);
   }
 
-  smoothed[0] = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
-  smoothed[smoothed.length - 1] = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+  smoothed[0] = { x: fromPoi.x, y: fromPoi.y + 3.2, z: fromPoi.z };
+  smoothed[smoothed.length - 1] = { x: toPoi.x, y: toPoi.y + 3.2, z: toPoi.z };
   return ensurePoiApproachPoints(smoothed, fromPoi, toPoi, generator);
 }
 
 function applyPoiApproachPoints(
-  points: readonly Vector3[],
+  points: readonly TerrainPoint3[],
   fromPoi: TerrainPoi,
   toPoi: TerrainPoi,
   generator: ProceduralGenerator
-): Vector3[] {
-  const fromCenter = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
-  const toCenter = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+): TerrainPoint3[] {
+  const fromCenter = { x: fromPoi.x, y: fromPoi.y + 3.2, z: fromPoi.z };
+  const toCenter = { x: toPoi.x, y: toPoi.y + 3.2, z: toPoi.z };
 
   if (points.length <= 1) {
     return [fromCenter, toCenter];
@@ -454,11 +459,11 @@ function applyPoiApproachPoints(
 }
 
 function ensurePoiApproachPoints(
-  points: readonly Vector3[],
+  points: readonly TerrainPoint3[],
   fromPoi: TerrainPoi,
   toPoi: TerrainPoi,
   generator: ProceduralGenerator
-): Vector3[] {
+): TerrainPoint3[] {
   if (points.length <= 1) {
     return [...points];
   }
@@ -493,16 +498,16 @@ function ensurePoiApproachPoints(
     ensured.splice(ensured.length - 1, 0, toApproach);
   }
 
-  ensured[0] = new Vector3(fromPoi.x, fromPoi.y + 3.2, fromPoi.z);
-  ensured[ensured.length - 1] = new Vector3(toPoi.x, toPoi.y + 3.2, toPoi.z);
+  ensured[0] = { x: fromPoi.x, y: fromPoi.y + 3.2, z: fromPoi.z };
+  ensured[ensured.length - 1] = { x: toPoi.x, y: toPoi.y + 3.2, z: toPoi.z };
   return ensured;
 }
 
 function createPoiApproachPoint(
   poi: TerrainPoi,
-  toward: Vector3,
+  toward: TerrainPoint3,
   generator: ProceduralGenerator
-): Vector3 | null {
+): TerrainPoint3 | null {
   const dx = toward.x - poi.x;
   const dz = toward.z - poi.z;
   const length = Math.sqrt(dx * dx + dz * dz);
@@ -514,7 +519,7 @@ function createPoiApproachPoint(
   const x = poi.x + (dx / length) * radius;
   const z = poi.z + (dz / length) * radius;
   const sample = generator.sample(x, z);
-  return new Vector3(x, sample.height + 3.2, z);
+  return { x, y: sample.height + 3.2, z };
 }
 
 function getPoiApproachRadius(kind: TerrainPoiKind): number {
@@ -529,7 +534,7 @@ function getPoiApproachRadius(kind: TerrainPoiKind): number {
 }
 
 function hasNearbyApproachPoint(
-  points: readonly Vector3[],
+  points: readonly TerrainPoint3[],
   poi: TerrainPoi,
   minDistance: number,
   maxDistance: number
@@ -541,11 +546,11 @@ function hasNearbyApproachPoint(
 }
 
 function clampRoadPointToSurface(
-  point: Vector3,
+  point: TerrainPoint3,
   generator: ProceduralGenerator
-): Vector3 {
+): TerrainPoint3 {
   const sample = generator.sample(point.x, point.z);
-  return new Vector3(point.x, sample.height + 3.2, point.z);
+  return { x: point.x, y: sample.height + 3.2, z: point.z };
 }
 
 function estimateCrossingWidth(
@@ -576,6 +581,14 @@ function estimateLocalSlope(
   const gradX = (right - left) / (step * 2);
   const gradZ = (up - down) / (step * 2);
   return smoothStep(0.03, 0.2, Math.sqrt(gradX * gradX + gradZ * gradZ));
+}
+
+function lerpPoint(a: TerrainPoint3, b: TerrainPoint3, t: number): TerrainPoint3 {
+  return {
+    x: Scalar.Lerp(a.x, b.x, t),
+    y: Scalar.Lerp(a.y, b.y, t),
+    z: Scalar.Lerp(a.z, b.z, t)
+  };
 }
 
 class MinPriorityQueue {

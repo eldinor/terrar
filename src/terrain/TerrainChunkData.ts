@@ -3,7 +3,7 @@ import { classifyTerrainBiome, TerrainBiome } from "./TerrainBiome";
 import { TerrainConfig, TerrainLODLevel } from "./TerrainConfig";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { TerrainPoi, TerrainPoiKind } from "./TerrainPoiPlanner";
-import { TerrainRoad } from "./TerrainRoadPlanner";
+import { TerrainPoint3, TerrainRoad } from "./TerrainRoadPlanner";
 
 export interface TerrainSampleGrid {
   readonly resolution: number;
@@ -342,8 +342,8 @@ function getPoiFootprintParams(kind: TerrainPoiKind): PoiFootprintParams {
 function closestPointOnSegmentXZ(
   x: number,
   z: number,
-  start: Vector3,
-  end: Vector3
+  start: TerrainPoint3,
+  end: TerrainPoint3
 ): { distance: number; height: number } {
   const dx = end.x - start.x;
   const dz = end.z - start.z;

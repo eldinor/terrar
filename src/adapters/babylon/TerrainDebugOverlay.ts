@@ -5,8 +5,8 @@ import { LinesMesh } from "@babylonjs/core/Meshes/linesMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
-import { TerrainChunk } from "./TerrainChunk";
-import { TerrainConfig } from "./TerrainConfig";
+import { TerrainChunk } from "../../terrain/TerrainChunk";
+import { TerrainConfig } from "../../terrain/TerrainConfig";
 
 export class TerrainDebugOverlay {
   private readonly lineMeshes: LinesMesh[] = [];

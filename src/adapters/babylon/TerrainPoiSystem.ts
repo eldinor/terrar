@@ -11,7 +11,8 @@ import {
   TerrainPoi,
   TerrainPoiKind,
   TerrainPoiPlanner
-} from "./TerrainPoiPlanner";
+} from "../../terrain/TerrainPoiPlanner";
+import type { TerrainPoiPresenter } from "../../terrain/TerrainPresentation";
 
 export interface TerrainPoiStats {
   readonly total: number;
@@ -49,7 +50,7 @@ export const DEFAULT_TERRAIN_POI_DEBUG_CONFIG: TerrainPoiDebugConfig = Object.fr
   })
 });
 
-export class TerrainPoiSystem {
+export class TerrainPoiSystem implements TerrainPoiPresenter {
   private static readonly LABEL_UPDATE_INTERVAL_FRAMES = 3;
   private static readonly LABEL_CAMERA_MOVE_EPSILON_SQUARED = 1;
   private static readonly LABEL_CAMERA_TARGET_MOVE_EPSILON_SQUARED = 1;

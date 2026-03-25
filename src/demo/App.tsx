@@ -200,6 +200,12 @@ export function App() {
             snapshot.footerMount,
           )
         : null}
+      {snapshot.footerPerformanceMount
+        ? createPortal(
+            <FooterPerformance text={snapshot.performanceText} />,
+            snapshot.footerPerformanceMount,
+          )
+        : null}
       {snapshot.featurePanelMount && snapshot.featurePanelState
         ? createPortal(
             <FeaturePanel
@@ -248,6 +254,10 @@ export function App() {
 
 function FooterStatus({ text }: { readonly text: string }) {
   return <div className="editor-footer-status">{text}</div>;
+}
+
+function FooterPerformance({ text }: { readonly text: string }) {
+  return <div className="editor-footer-performance">{text}</div>;
 }
 
 function LeftPanel({

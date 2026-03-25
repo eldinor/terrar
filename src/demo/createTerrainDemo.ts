@@ -1,5 +1,6 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
+import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -89,6 +90,7 @@ export interface TerrainDemo {
   readonly subscribeBuildStatus: (
     listener: (status: TerrainBuildStatus) => void
   ) => () => void;
+  readonly getPerformanceStats: () => TerrainPerformanceStats;
   readonly getWorkerStatus: () => TerrainWorkerStatus;
   readonly getBuildProfile: () => TerrainBuildProfile;
 }
@@ -119,6 +121,15 @@ export interface TerrainBuildProfile {
   readonly lastChunkWorkerBuildMs: number;
   readonly lastMeshApplyMs: number;
   readonly lastTotalRebuildMs: number;
+}
+
+export interface TerrainPerformanceStats {
+  readonly fps: number;
+  readonly drawCalls: number;
+  readonly meshes: number;
+  readonly activeMeshes: number;
+  readonly activeVertices: number;
+  readonly totalVertices: number;
 }
 
 export interface TerrainDemoRenderPolicyContext {
@@ -168,10 +179,12 @@ export function createTerrainDemo(
   camera.lowerRadiusLimit = 140;
   camera.upperRadiusLimit = 2000;
   camera.wheelDeltaPercentage = 0.01;
+  camera.panningSensibility = 120;
   camera.attachControl(canvas, true);
 
   const light = new HemisphericLight("terrain-light", new Vector3(0.4, 1, 0.2), scene);
   light.intensity = 0.95;
+  const sceneInstrumentation = new SceneInstrumentation(scene);
   const workersEnabled = typeof Worker !== "undefined";
   const crossOriginIsolated = globalThis.crossOriginIsolated === true;
   const sharedArrayBufferDefined = typeof SharedArrayBuffer !== "undefined";
@@ -314,6 +327,7 @@ export function createTerrainDemo(
       }
     });
   terrainAdapter.update(camera.position);
+  sceneInstrumentation.captureFrameTime = true;
   renderController = createRenderController(engine, {
     forceReadyFrame: renderPolicy.forceReadyFrame,
     idleTimeoutMs: renderPolicy.idleTimeoutMs,
@@ -348,6 +362,7 @@ export function createTerrainDemo(
     beginInteractiveRendering();
   });
   window.addEventListener("beforeunload", () => {
+    sceneInstrumentation.dispose();
     buildCoordinator.dispose();
     chunkBuildCoordinator.dispose();
   });
@@ -663,6 +678,22 @@ export function createTerrainDemo(
       listener(buildStatus);
       return () => {
         buildStatusListeners.delete(listener);
+      };
+    },
+    getPerformanceStats: () => {
+      const activeMeshes = scene.getActiveMeshes();
+      let activeVertices = 0;
+      for (let index = 0; index < activeMeshes.length; index += 1) {
+        activeVertices += activeMeshes.data[index]?.getTotalVertices() ?? 0;
+      }
+
+      return {
+        fps: engine.getFps(),
+        drawCalls: sceneInstrumentation.drawCallsCounter.current,
+        meshes: scene.meshes.length,
+        activeMeshes: activeMeshes.length,
+        activeVertices,
+        totalVertices: scene.getTotalVertices()
       };
     },
     getWorkerStatus: () => ({

@@ -12,7 +12,11 @@ import { DEFAULT_TERRAIN_WATER_CONFIG } from "../src/terrain/TerrainWaterSystem"
 import type {
   FeaturePanelState,
 } from "../src/demo/demoSnapshots";
-import type { TerrainDemo, TerrainBuildStatus } from "../src/demo/createTerrainDemo";
+import type {
+  TerrainDemo,
+  TerrainBuildStatus,
+  TerrainPerformanceStats,
+} from "../src/demo/createTerrainDemo";
 import type { RenderSuspendToken } from "../src/adapters/babylon";
 
 class FakeElement {
@@ -141,6 +145,15 @@ const defaultBuildProfile = {
   lastMeshApplyMs: 3,
   lastTotalRebuildMs: 28,
 } as const;
+
+const defaultPerformanceStats: TerrainPerformanceStats = {
+  fps: 118,
+  drawCalls: 142,
+  meshes: 318,
+  activeMeshes: 96,
+  activeVertices: 1384200,
+  totalVertices: 2412300,
+};
 
 const noopSuspendToken: RenderSuspendToken = {
   dispose(): void {},
@@ -303,6 +316,7 @@ function createTerrainDemoStub(): DemoStub {
         listeners.delete(listener);
       };
     },
+    getPerformanceStats: () => ({ ...defaultPerformanceStats }),
     getWorkerStatus: () => ({ ...defaultWorkerStatus }),
     getBuildProfile: () => ({ ...defaultBuildProfile }),
     emitBuildStatus: (status: TerrainBuildStatus) => {
@@ -371,6 +385,9 @@ describe("demo bridge", () => {
     expect(initial.activePanelTab).toBe("runtime");
     expect(initial.leftPanelMount?.id).toBe("react-left-panel");
     expect(initial.featurePanelMount?.id).toBe("react-feature-panel");
+    expect(initial.footerPerformanceMount?.id).toBe("react-footer-performance");
+    expect(initial.performanceText).toContain("FPS 118");
+    expect(initial.performanceText).toContain("A-Vert 1.4M");
 
     bridgeModule.setActivePanelTab("material");
 

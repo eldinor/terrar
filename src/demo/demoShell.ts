@@ -77,7 +77,21 @@ export function createFeaturePanelMount(): HTMLElement {
 
 export function createFooterMount(): HTMLElement {
   const wrap = document.createElement("div");
+  wrap.className = "demo-shell-footer-content";
+  wrap.appendChild(createFooterStatusMount());
+  wrap.appendChild(createFooterPerformanceMount());
+  return wrap;
+}
+
+export function createFooterStatusMount(): HTMLElement {
+  const wrap = document.createElement("div");
   wrap.id = "react-footer-status";
+  return wrap;
+}
+
+export function createFooterPerformanceMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-footer-performance";
   return wrap;
 }
 

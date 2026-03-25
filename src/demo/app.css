@@ -237,6 +237,15 @@ body {
   letter-spacing: 0;
 }
 
+.demo-shell-footer-content {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
 .demo-shell-viewport {
   position: relative;
   min-height: 0;
@@ -682,6 +691,16 @@ body {
   white-space: nowrap;
   color: var(--editor-text-secondary);
   font: 11px/1.45 Consolas, "Courier New", monospace;
+}
+
+.editor-footer-performance {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--editor-text-secondary);
+  font: 11px/1.45 Consolas, "Courier New", monospace;
+  text-align: right;
 }
 
 .editor-empty {

@@ -88,11 +88,13 @@ export interface DemoSnapshot {
   readonly featurePanelState: FeaturePanelState | null;
   readonly featureStatusText: string;
   readonly footerMount: HTMLElement | null;
+  readonly footerPerformanceMount: HTMLElement | null;
   readonly headerActionsMount: HTMLElement | null;
   readonly headerTrailingActionsMount: HTMLElement | null;
   readonly hudText: string;
   readonly leftPanelMount: HTMLElement | null;
   readonly materialTabState: MaterialTabState | null;
+  readonly performanceText: string;
   readonly presetOptions: readonly TerrainPreset[];
   readonly runtimeTabState: RuntimeTabState | null;
   readonly worldTabState: WorldTabState | null;
@@ -108,6 +110,7 @@ let presetOptions: TerrainPreset[] = [];
 let activeTab: PanelTab = "runtime";
 let transientHudMessage = "";
 let transientHudTimeoutId: number | null = null;
+let performanceText = "";
 const snapshotListeners = new Set<() => void>();
 let currentSnapshot: DemoSnapshot | null = null;
 
@@ -121,6 +124,7 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   debugVisible = false;
   loadingDebug = false;
   transientHudMessage = "";
+  performanceText = formatPerformanceText(nextContext.demo.getPerformanceStats());
   if (transientHudTimeoutId !== null) {
     window.clearTimeout(transientHudTimeoutId);
     transientHudTimeoutId = null;
@@ -144,7 +148,8 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   window.setInterval(() => {
     renderHud();
     updateFeatureBuildStatus();
-  }, 250);
+    updatePerformanceStats();
+  }, 200);
 
   nextContext.demo.subscribeBuildStatus((status) => {
     buildStatus = status;
@@ -422,6 +427,10 @@ export function saveCurrentPreset(name: string): void {
   renderFeaturePanel();
 }
 
+export function getPerformanceText(): string {
+  return performanceText;
+}
+
 export function exportTerrainBundle(): void {
   try {
     const current = requireContext();
@@ -563,6 +572,15 @@ function renderHeaderTrailingActions(): void {
 
 function updateFeatureBuildStatus(): void {
   renderFeatureStatus();
+}
+
+function updatePerformanceStats(): void {
+  const nextText = formatPerformanceText(requireContext().demo.getPerformanceStats());
+  if (nextText === performanceText) {
+    return;
+  }
+  performanceText = nextText;
+  publishSnapshot();
 }
 
 async function applyDraftToWorld(): Promise<void> {
@@ -711,13 +729,39 @@ function createSnapshot(): DemoSnapshot {
     featurePanelState: getFeaturePanelState(),
     featureStatusText: getFeatureBuildStatusText(),
     footerMount: document.getElementById("react-footer-status"),
+    footerPerformanceMount: document.getElementById("react-footer-performance"),
     headerActionsMount: document.getElementById("react-header-actions"),
     headerTrailingActionsMount: document.getElementById("react-header-actions-trailing"),
     hudText: getHudText(),
     leftPanelMount: document.getElementById("react-left-panel"),
     materialTabState: getMaterialTabState(),
+    performanceText: getPerformanceText(),
     presetOptions: getPresetOptionsData(),
     runtimeTabState: getRuntimeTabState(),
     worldTabState: getWorldTabState(),
   };
+}
+
+function formatPerformanceText(stats: TerrainDemo["getPerformanceStats"] extends () => infer TResult ? TResult : never): string {
+  return [
+    `FPS ${formatMetricValue(stats.fps)}`,
+    `DC ${formatMetricValue(stats.drawCalls)}`,
+    `Mesh ${formatMetricValue(stats.meshes)}`,
+    `Active ${formatMetricValue(stats.activeMeshes)}`,
+    `A-Vert ${formatMetricValue(stats.activeVertices)}`,
+    `Vert ${formatMetricValue(stats.totalVertices)}`
+  ].join(" | ");
+}
+
+function formatMetricValue(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}K`;
+  }
+  return value >= 100 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, "");
 }

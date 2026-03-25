@@ -176,4 +176,7 @@ npm run dev
 npm run lint
 npm test -- --run
 npm run build
+npm run docs:api
 ```
+
+API docs are generated into `docs/typedoc/`.

@@ -481,6 +481,26 @@ describe("demo bridge", () => {
     expect(thirdSnapshot.activePanelTab).toBe("material");
   });
 
+  it("keeps world draft seed edits in the published snapshot", async () => {
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+
+    const initial = bridgeModule.getWorldTabState();
+    bridgeModule.setWorldTabState({
+      ...initial,
+      seed: "my-custom-seed",
+    });
+
+    expect(bridgeModule.getSnapshot().worldTabState?.seed).toBe("my-custom-seed");
+  });
+
   it("shows a transient HUD message after browser terrain export", async () => {
     vi.doMock("../src/builder", async () => {
       const actual = await vi.importActual<typeof import("../src/builder")>("../src/builder");

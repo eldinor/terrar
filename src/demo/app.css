@@ -194,6 +194,13 @@ body {
   min-width: 0;
 }
 
+.demo-brand-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
 .demo-brand-current {
   display: inline-flex;
   align-items: center;
@@ -225,6 +232,14 @@ body {
 .demo-brand-name-suffix {
   font-size: 12px;
   letter-spacing: 0.16em;
+}
+
+.demo-brand-tag {
+  color: var(--editor-text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  line-height: 1;
 }
 
 .demo-shell-footer {

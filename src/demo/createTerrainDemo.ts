@@ -34,6 +34,9 @@ import { TerrainSystem } from "../terrain/TerrainSystem";
 import { TerrainChunkBuildProfile } from "../terrain/TerrainChunkMeshRuntime";
 import { TerrainFoliageStats } from "../terrain/TerrainFoliageSystem";
 
+/**
+ * Runtime API exposed by the interactive terrain demo.
+ */
 export interface TerrainDemo {
   readonly engine: Engine;
   readonly scene: Scene;
@@ -95,6 +98,9 @@ export interface TerrainDemo {
   readonly getBuildProfile: () => TerrainBuildProfile;
 }
 
+/**
+ * Coarse-grained rebuild state for world generation and chunk application.
+ */
 export interface TerrainBuildStatus {
   readonly phase: "idle" | "world" | "chunks" | "error";
   readonly message: string;
@@ -102,6 +108,9 @@ export interface TerrainBuildStatus {
   readonly total: number;
 }
 
+/**
+ * Worker and chunk-pipeline health surfaced to the UI.
+ */
 export interface TerrainWorkerStatus {
   readonly workersEnabled: boolean;
   readonly sharedSnapshotsEnabled: boolean;
@@ -115,6 +124,9 @@ export interface TerrainWorkerStatus {
   readonly applyingChunkMeshes: boolean;
 }
 
+/**
+ * Timing measurements captured for the most recent terrain rebuild.
+ */
 export interface TerrainBuildProfile {
   readonly lastWorldBuildMs: number;
   readonly lastTerrainSwapMs: number;
@@ -123,6 +135,9 @@ export interface TerrainBuildProfile {
   readonly lastTotalRebuildMs: number;
 }
 
+/**
+ * Lazily sampled render statistics shown in the debug footer.
+ */
 export interface TerrainPerformanceStats {
   readonly fps: number;
   readonly drawCalls: number;
@@ -132,33 +147,52 @@ export interface TerrainPerformanceStats {
   readonly totalVertices: number;
 }
 
+/**
+ * Context passed to custom render policies when deciding whether to keep
+ * the Babylon render loop alive.
+ */
 export interface TerrainDemoRenderPolicyContext {
   readonly buildStatus: TerrainBuildStatus;
   readonly camera: ArcRotateCamera;
   readonly scene: Scene;
 }
 
+/**
+ * Optional tuning hooks for on-demand rendering in the demo.
+ */
 export interface TerrainDemoRenderPolicy {
   readonly forceReadyFrame?: boolean;
   readonly idleTimeoutMs?: number;
   readonly shouldRender?: (context: TerrainDemoRenderPolicyContext) => boolean;
 }
 
+/**
+ * Additional options for demo creation that do not belong to terrain config.
+ */
 export interface TerrainDemoOptions {
   readonly renderPolicy?: TerrainDemoRenderPolicy;
 }
 
+/**
+ * Shared render policy used by the browser demo when no overrides are provided.
+ */
 export const DEFAULT_DEMO_RENDER_POLICY: TerrainDemoRenderPolicy = {
   idleTimeoutMs: 250,
   forceReadyFrame: true
 };
 
+/**
+ * Resolves an optional render policy to the demo default.
+ */
 export function resolveTerrainDemoRenderPolicy(
   renderPolicy?: TerrainDemoRenderPolicy
 ): TerrainDemoRenderPolicy {
   return renderPolicy ?? DEFAULT_DEMO_RENDER_POLICY;
 }
 
+/**
+ * Creates the interactive Babylon-backed terrain demo and returns its control API.
+ */
 export function createTerrainDemo(
   canvas: HTMLCanvasElement,
   overrides: BuiltTerrainConfigOverrides = {},
@@ -303,6 +337,11 @@ export function createTerrainDemo(
   );
   frameCameraToWorld(camera, terrainAdapter.getConfig());
   terrainAdapter.initialize();
+  terrainAdapter.setShowPoi(terrain.config.features.poi);
+  terrainAdapter.setPoiMarkerMeshesVisible(true);
+  terrainAdapter.setPoiLabelsVisible(true);
+  terrainAdapter.setShowPoiFootprints(true);
+  terrainAdapter.setShowRoads(terrain.config.features.roads);
   void terrainAdapter
     .whenChunkMeshesReady()
     .then(() => {

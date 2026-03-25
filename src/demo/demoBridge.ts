@@ -55,6 +55,9 @@ interface DemoBridgeContext {
   readonly featurePanel: HTMLDivElement;
 }
 
+/**
+ * UI bridge consumed by the React layer for snapshot reads and user actions.
+ */
 export interface DemoBridge {
   getSnapshot(): DemoSnapshot;
   getFeaturePanelState(): FeaturePanelState;
@@ -82,6 +85,9 @@ export interface DemoBridge {
   setWorldTabState(state: WorldTabState): void;
 }
 
+/**
+ * Immutable view-model snapshot published to React subscribers.
+ */
 export interface DemoSnapshot {
   readonly activePanelTab: PanelTab;
   readonly featurePanelMount: HTMLElement | null;
@@ -114,6 +120,9 @@ let performanceText = "";
 const snapshotListeners = new Set<() => void>();
 let currentSnapshot: DemoSnapshot | null = null;
 
+/**
+ * Wires the demo runtime to the DOM mounts used by the React UI.
+ */
 export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   context = nextContext;
   buildStatus = nextContext.demo.getBuildStatus();
@@ -188,6 +197,9 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   });
 }
 
+/**
+ * Subscribes to immutable snapshot updates.
+ */
 export function subscribe(listener: () => void): () => void {
   snapshotListeners.add(listener);
   return () => {
@@ -195,6 +207,9 @@ export function subscribe(listener: () => void): () => void {
   };
 }
 
+/**
+ * Returns the latest published UI snapshot.
+ */
 export function getSnapshot(): DemoSnapshot {
   if (!currentSnapshot) {
     currentSnapshot = createSnapshot();
@@ -203,6 +218,9 @@ export function getSnapshot(): DemoSnapshot {
   return currentSnapshot;
 }
 
+/**
+ * Builds the left footer HUD string for the current demo state.
+ */
 export function getHudText(): string {
   const current = requireContext();
   return buildHudText({
@@ -218,6 +236,9 @@ export function getHudText(): string {
   });
 }
 
+/**
+ * Builds the feature panel status text shown above feature controls.
+ */
 export function getFeatureBuildStatusText(): string {
   const current = requireContext();
   return buildFeatureBuildStatusText({
@@ -228,28 +249,46 @@ export function getFeatureBuildStatusText(): string {
   });
 }
 
+/**
+ * Returns the saved preset list currently visible to the UI.
+ */
 export function getPresetOptionsData(): TerrainPreset[] {
   return presetOptions.map(clonePreset);
 }
 
+/**
+ * Builds the current feature panel state from the live demo and draft config.
+ */
 export function getFeaturePanelState(): FeaturePanelState {
   const current = requireContext();
   return buildFeaturePanelState(requireDraftConfig(), current.demo.getPoiStats(), current.demo.getPoiMeshStats());
 }
 
+/**
+ * Builds the runtime tab state for React.
+ */
 export function getRuntimeTabState(): RuntimeTabState {
   const current = requireContext();
   return buildRuntimeTabState(requireDraftConfig(), current.demo.getDebugViewMode());
 }
 
+/**
+ * Builds the material tab state for React.
+ */
 export function getMaterialTabState(): MaterialTabState {
   return buildMaterialTabState(requireDraftConfig());
 }
 
+/**
+ * Builds the world tab state for React.
+ */
 export function getWorldTabState(): WorldTabState {
   return buildWorldTabState(requireDraftConfig());
 }
 
+/**
+ * Returns the currently selected left-panel tab.
+ */
 export function getActivePanelTab(): PanelTab {
   return activeTab;
 }
@@ -351,7 +390,7 @@ export function setMaterialTabState(state: MaterialTabState): void {
 
 export function setWorldTabState(state: WorldTabState): void {
   const currentDraft = requireDraftConfig();
-  currentDraft.seed = state.seed.trim() === "" ? "1337" : state.seed;
+  currentDraft.seed = state.seed;
   currentDraft.chunksPerAxis = state.chunksPerAxis;
   currentDraft.chunkSize = state.chunkSize;
   syncDraftWorldBounds(currentDraft);
@@ -369,6 +408,7 @@ export function setWorldTabState(state: WorldTabState): void {
     maxDepth: Math.max(state.rivers.maxDepth, state.rivers.depth),
   };
   currentDraft.poi = { ...state.poi };
+  renderWorldTabState();
 }
 
 export function retuneWorldTabForWorldSize(): void {
@@ -427,10 +467,16 @@ export function saveCurrentPreset(name: string): void {
   renderFeaturePanel();
 }
 
+/**
+ * Returns the right footer performance string shown by the UI.
+ */
 export function getPerformanceText(): string {
   return performanceText;
 }
 
+/**
+ * Exports the current terrain as a browser-downloaded ZIP bundle.
+ */
 export function exportTerrainBundle(): void {
   try {
     const current = requireContext();
@@ -452,6 +498,9 @@ export function exportTerrainBundle(): void {
   }
 }
 
+/**
+ * Imports a serialized `terrain.asset.json` payload into the current demo.
+ */
 export async function importTerrainAssetText(serialized: string): Promise<void> {
   try {
     const current = requireContext();
@@ -470,6 +519,9 @@ export async function importTerrainAssetText(serialized: string): Promise<void> 
   }
 }
 
+/**
+ * Exports a saved preset as JSON.
+ */
 export function exportPresetByIndex(index: number): void {
   const preset = presetOptions[index];
   if (!preset) {
@@ -479,6 +531,9 @@ export function exportPresetByIndex(index: number): void {
   downloadJsonFile(`${slugifyPresetName(preset.name)}.json`, clonePreset(preset));
 }
 
+/**
+ * Imports preset JSON into local saved presets.
+ */
 export function importPresetText(serialized: string): void {
   const defaultPoiDebug = buildDraftConfig().poiDebug;
   const imported = parseImportedPresets(serialized, defaultPoiDebug);
@@ -490,10 +545,16 @@ export function importPresetText(serialized: string): void {
   renderFeaturePanel();
 }
 
+/**
+ * Rebuilds the terrain from the current draft configuration.
+ */
 export async function rebuildTerrainFromDraft(): Promise<void> {
   await applyDraftToWorld();
 }
 
+/**
+ * Resets the editable draft configuration back to the live terrain state.
+ */
 export function resetDraftTerrainConfig(): void {
   draftConfig = buildDraftConfig();
   renderPanel();

@@ -97,6 +97,7 @@ export interface DemoSnapshot {
   readonly footerPerformanceMount: HTMLElement | null;
   readonly headerActionsMount: HTMLElement | null;
   readonly headerTrailingActionsMount: HTMLElement | null;
+  readonly hudStatusText: string;
   readonly hudText: string;
   readonly leftPanelMount: HTMLElement | null;
   readonly materialTabState: MaterialTabState | null;
@@ -234,6 +235,13 @@ export function getHudText(): string {
     wireframe,
     workerStatus: current.demo.getWorkerStatus(),
   });
+}
+
+export function getHudStatusText(): string {
+  if (buildStatus.phase !== "idle") {
+    return `build: ${buildStatus.message}`;
+  }
+  return transientHudMessage;
 }
 
 /**
@@ -793,6 +801,7 @@ function createSnapshot(): DemoSnapshot {
     footerPerformanceMount: document.getElementById("react-footer-performance"),
     headerActionsMount: document.getElementById("react-header-actions"),
     headerTrailingActionsMount: document.getElementById("react-header-actions-trailing"),
+    hudStatusText: getHudStatusText(),
     hudText: getHudText(),
     leftPanelMount: document.getElementById("react-left-panel"),
     materialTabState: getMaterialTabState(),

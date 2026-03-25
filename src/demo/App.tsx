@@ -196,7 +196,7 @@ export function App() {
         : null}
       {snapshot.footerMount
         ? createPortal(
-            <FooterStatus text={snapshot.hudText} />,
+            <FooterStatus statusText={snapshot.hudStatusText} text={snapshot.hudText} />,
             snapshot.footerMount,
           )
         : null}
@@ -252,8 +252,26 @@ export function App() {
   );
 }
 
-function FooterStatus({ text }: { readonly text: string }) {
-  return <div className="editor-footer-status">{text}</div>;
+function FooterStatus({
+  statusText,
+  text
+}: {
+  readonly statusText: string;
+  readonly text: string;
+}) {
+  if (!statusText) {
+    return <div className="editor-footer-status">{text}</div>;
+  }
+
+  const suffix = ` | ${statusText}`;
+  const baseText = text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
+
+  return (
+    <div className="editor-footer-status">
+      <span>{baseText}</span>
+      <span className="editor-footer-status-highlight">{suffix}</span>
+    </div>
+  );
 }
 
 function FooterPerformance({ text }: { readonly text: string }) {

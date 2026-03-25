@@ -708,6 +708,10 @@ body {
   font: 11px/1.45 Consolas, "Courier New", monospace;
 }
 
+.editor-footer-status-highlight {
+  color: var(--editor-text);
+}
+
 .editor-footer-performance {
   min-width: 0;
   overflow: hidden;

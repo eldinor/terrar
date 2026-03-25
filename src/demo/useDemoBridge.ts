@@ -10,6 +10,7 @@ const EMPTY_SNAPSHOT: DemoSnapshot = {
   footerPerformanceMount: null,
   headerActionsMount: null,
   headerTrailingActionsMount: null,
+  hudStatusText: "",
   hudText: "",
   leftPanelMount: null,
   materialTabState: null,

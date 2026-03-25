@@ -112,7 +112,7 @@ export const DEFAULT_BUILT_TERRAIN_SHAPE_CONFIG: BuiltTerrainShapeConfig = Objec
 
 export const DEFAULT_BUILT_TERRAIN_EROSION_CONFIG: BuiltTerrainErosionConfig = Object.freeze({
   enabled: true,
-  resolution: 257,
+  resolution: 513,
   iterations: 10,
   talusHeight: 1.7,
   smoothing: 0.14
@@ -120,7 +120,7 @@ export const DEFAULT_BUILT_TERRAIN_EROSION_CONFIG: BuiltTerrainErosionConfig = O
 
 export const DEFAULT_BUILT_TERRAIN_RIVER_CONFIG: BuiltTerrainRiverConfig = Object.freeze({
   enabled: true,
-  resolution: 257,
+  resolution: 513,
   flowThreshold: 0.82,
   bankStrength: 0.54,
   lakeThreshold: 1.55,

@@ -144,6 +144,11 @@ body {
   transform: translateY(-50%);
 }
 
+.demo-shell-header-actions-trailing {
+  left: auto;
+  right: 14px;
+}
+
 .demo-brand-picker {
   display: inline-flex;
   align-items: center;

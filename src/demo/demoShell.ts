@@ -1,6 +1,7 @@
 export interface DemoShell {
   readonly canvas: HTMLCanvasElement;
   readonly headerActions: HTMLDivElement;
+  readonly headerTrailingActions: HTMLDivElement;
   readonly footer: HTMLDivElement;
   readonly leftPanel: HTMLDivElement;
   readonly featurePanel: HTMLDivElement;
@@ -24,6 +25,10 @@ export function createDemoShell(): DemoShell {
   const headerActions = document.createElement("div");
   headerActions.className = "demo-shell-header-actions";
   header.appendChild(headerActions);
+
+  const headerTrailingActions = document.createElement("div");
+  headerTrailingActions.className = "demo-shell-header-actions demo-shell-header-actions-trailing";
+  header.appendChild(headerTrailingActions);
 
   shell.appendChild(header);
 
@@ -51,6 +56,7 @@ export function createDemoShell(): DemoShell {
   return {
     canvas,
     headerActions,
+    headerTrailingActions,
     footer,
     leftPanel,
     featurePanel,
@@ -78,6 +84,12 @@ export function createFooterMount(): HTMLElement {
 export function createHeaderActionsMount(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.id = "react-header-actions";
+  return wrap;
+}
+
+export function createHeaderTrailingActionsMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-header-actions-trailing";
   return wrap;
 }
 

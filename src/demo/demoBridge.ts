@@ -1,8 +1,15 @@
 import type { TerrainDemo } from "./createTerrainDemo";
 import {
+  createTerrainExportBundle,
+  createTerrainExportZipBytes,
+  deserializeTerrainAsset,
+  encodeTerrainExportFiles,
+} from "../builder";
+import {
   createFeaturePanelMount,
   createFooterMount,
   createHeaderActionsMount,
+  createHeaderTrailingActionsMount,
   createLeftPanelMount,
 } from "./demoShell";
 import {
@@ -12,6 +19,7 @@ import {
   clonePoiDebugConfig,
   clonePreset,
   type DraftConfig,
+  downloadBinaryFile,
   downloadJsonFile,
   getPresetOptions,
   getSavedPresets,
@@ -41,6 +49,7 @@ import {
 interface DemoBridgeContext {
   readonly demo: TerrainDemo;
   readonly headerActions: HTMLDivElement;
+  readonly headerTrailingActions: HTMLDivElement;
   readonly footer: HTMLDivElement;
   readonly panel: HTMLDivElement;
   readonly featurePanel: HTMLDivElement;
@@ -58,6 +67,8 @@ export interface DemoBridge {
   getWorldTabState(): WorldTabState;
   subscribe(listener: () => void): () => void;
   applyPresetByIndex(index: number): Promise<void>;
+  exportTerrainBundle(): void;
+  importTerrainAssetText(serialized: string): Promise<void>;
   saveCurrentPreset(name: string): void;
   exportPresetByIndex(index: number): void;
   importPresetText(serialized: string): void;
@@ -78,6 +89,7 @@ export interface DemoSnapshot {
   readonly featureStatusText: string;
   readonly footerMount: HTMLElement | null;
   readonly headerActionsMount: HTMLElement | null;
+  readonly headerTrailingActionsMount: HTMLElement | null;
   readonly hudText: string;
   readonly leftPanelMount: HTMLElement | null;
   readonly materialTabState: MaterialTabState | null;
@@ -94,6 +106,8 @@ let loadingDebug = false;
 let draftConfig: DraftConfig | null = null;
 let presetOptions: TerrainPreset[] = [];
 let activeTab: PanelTab = "runtime";
+let transientHudMessage = "";
+let transientHudTimeoutId: number | null = null;
 const snapshotListeners = new Set<() => void>();
 let currentSnapshot: DemoSnapshot | null = null;
 
@@ -106,6 +120,11 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   wireframe = false;
   debugVisible = false;
   loadingDebug = false;
+  transientHudMessage = "";
+  if (transientHudTimeoutId !== null) {
+    window.clearTimeout(transientHudTimeoutId);
+    transientHudTimeoutId = null;
+  }
 
   renderHud();
   renderFeatureStatus();
@@ -118,6 +137,7 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   renderPanel();
   renderFeaturePanel();
   renderHeaderActions();
+  renderHeaderTrailingActions();
   renderFooter();
   publishSnapshot();
 
@@ -187,6 +207,7 @@ export function getHudText(): string {
     loadingDebug,
     poi: current.demo.getPoiStats(),
     roads: current.demo.getRoadStats(),
+    statusMessage: transientHudMessage,
     wireframe,
     workerStatus: current.demo.getWorkerStatus(),
   });
@@ -401,6 +422,45 @@ export function saveCurrentPreset(name: string): void {
   renderFeaturePanel();
 }
 
+export function exportTerrainBundle(): void {
+  try {
+    const current = requireContext();
+    const terrain = current.demo.getTerrainAsset();
+    const bundle = createTerrainExportBundle(terrain);
+    const encoded = encodeTerrainExportFiles(bundle);
+    const zipBytes = createTerrainExportZipBytes(encoded, {
+      includePortableGraymaps: false,
+    });
+    downloadBinaryFile(
+      `${slugifyPresetName(`terrain-${terrain.config.seed}`)}.zip`,
+      zipBytes,
+      "application/zip",
+    );
+    setTransientHudMessage("terrain zip downloaded");
+  } catch (error) {
+    console.error(error);
+    setTransientHudMessage("terrain export failed");
+  }
+}
+
+export async function importTerrainAssetText(serialized: string): Promise<void> {
+  try {
+    const current = requireContext();
+    const terrain = deserializeTerrainAsset(serialized);
+    await current.demo.importTerrainAsset(terrain);
+    debugVisible = false;
+    draftConfig = buildDraftConfig();
+    renderPanel();
+    renderFeaturePanel();
+    renderFeatureStatus();
+    setTransientHudMessage("terrain asset imported");
+  } catch (error) {
+    console.error(error);
+    setTransientHudMessage("terrain import failed");
+    throw error;
+  }
+}
+
 export function exportPresetByIndex(index: number): void {
   const preset = presetOptions[index];
   if (!preset) {
@@ -493,6 +553,12 @@ function renderHeaderActions(): void {
   const current = requireContext();
   current.headerActions.replaceChildren();
   current.headerActions.appendChild(createHeaderActionsMount());
+}
+
+function renderHeaderTrailingActions(): void {
+  const current = requireContext();
+  current.headerTrailingActions.replaceChildren();
+  current.headerTrailingActions.appendChild(createHeaderTrailingActionsMount());
 }
 
 function updateFeatureBuildStatus(): void {
@@ -623,6 +689,21 @@ function publishSnapshot(): void {
   snapshotListeners.forEach((listener) => listener());
 }
 
+function setTransientHudMessage(message: string, durationMs = 3000): void {
+  transientHudMessage = message;
+  renderHud();
+
+  if (transientHudTimeoutId !== null) {
+    window.clearTimeout(transientHudTimeoutId);
+  }
+
+  transientHudTimeoutId = window.setTimeout(() => {
+    transientHudMessage = "";
+    transientHudTimeoutId = null;
+    renderHud();
+  }, durationMs);
+}
+
 function createSnapshot(): DemoSnapshot {
   return {
     activePanelTab: getActivePanelTab(),
@@ -631,6 +712,7 @@ function createSnapshot(): DemoSnapshot {
     featureStatusText: getFeatureBuildStatusText(),
     footerMount: document.getElementById("react-footer-status"),
     headerActionsMount: document.getElementById("react-header-actions"),
+    headerTrailingActionsMount: document.getElementById("react-header-actions-trailing"),
     hudText: getHudText(),
     leftPanelMount: document.getElementById("react-left-panel"),
     materialTabState: getMaterialTabState(),

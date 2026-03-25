@@ -142,7 +142,7 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
       },
       erosion: {
         enabled: true,
-        resolution: 257,
+        resolution: 513,
         iterations: 14,
         talusHeight: 1.45,
         smoothing: 0.12,
@@ -164,7 +164,7 @@ const BUILTIN_PRESETS: readonly TerrainPreset[] = [
       },
       rivers: {
         enabled: true,
-        resolution: 257,
+        resolution: 513,
         flowThreshold: 0.64,
         bankStrength: 0.74,
         lakeThreshold: 2.5,
@@ -384,6 +384,19 @@ export function mergeImportedPresets(existing: TerrainPreset[], imported: Terrai
 
 export function downloadJsonFile(filename: string, payload: TerrainPreset): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  downloadBlob(filename, blob);
+}
+
+export function downloadBinaryFile(
+  filename: string,
+  bytes: Uint8Array,
+  mimeType: string,
+): void {
+  const blob = new Blob([new Uint8Array(bytes)], { type: mimeType });
+  downloadBlob(filename, blob);
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

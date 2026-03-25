@@ -7,7 +7,7 @@ import { createDemoShell } from "./demo/demoShell";
 
 export * from "./demo/demoBridge";
 
-const { canvas, headerActions, footer, leftPanel, featurePanel } = createDemoShell();
+const { canvas, headerActions, headerTrailingActions, footer, leftPanel, featurePanel } = createDemoShell();
 const demo = createTerrainDemo(canvas, {}, {}, {
   renderPolicy: DEFAULT_DEMO_RENDER_POLICY,
 });
@@ -15,6 +15,7 @@ const demo = createTerrainDemo(canvas, {}, {}, {
 initializeDemoBridge({
   demo,
   headerActions,
+  headerTrailingActions,
   footer,
   panel: leftPanel,
   featurePanel,

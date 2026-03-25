@@ -8,6 +8,7 @@ const EMPTY_SNAPSHOT: DemoSnapshot = {
   featureStatusText: "",
   footerMount: null,
   headerActionsMount: null,
+  headerTrailingActionsMount: null,
   hudText: "",
   leftPanelMount: null,
   materialTabState: null,

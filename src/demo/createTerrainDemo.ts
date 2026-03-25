@@ -37,6 +37,8 @@ export interface TerrainDemo {
   readonly engine: Engine;
   readonly scene: Scene;
   readonly camera: ArcRotateCamera;
+  readonly getTerrainAsset: () => BuiltTerrain;
+  readonly importTerrainAsset: (terrain: BuiltTerrain) => Promise<void>;
   readonly beginRendering: () => void;
   readonly stopRendering: () => void;
   readonly suspendRendering: () => RenderSuspendToken;
@@ -486,6 +488,80 @@ export function createTerrainDemo(
     }
   };
 
+  const importTerrainAsset = async (nextTerrain: BuiltTerrain): Promise<void> => {
+    const renderSuspendToken = renderController.suspendRendering();
+    try {
+      const wireframe = terrainAdapter.getWireframe();
+      const debugViewMode = terrainAdapter.getDebugViewMode();
+      const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
+      const waterLevel = terrainAdapter.getWaterLevel();
+      const waterConfig = terrainAdapter.getWaterConfig();
+      const collisionRadius = terrainAdapter.getCollisionRadius();
+      const foliageRadius = terrainAdapter.getFoliageRadius();
+      const showFoliage = terrainAdapter.getShowFoliage();
+      const showPoi = terrainAdapter.getShowPoi();
+      const poiMarkerMeshesVisible = terrainAdapter.getPoiMarkerMeshesVisible();
+      const poiLabelsVisible = terrainAdapter.getPoiLabelsVisible();
+      const showPoiFootprints = terrainAdapter.getShowPoiFootprints();
+      const poiDebugConfig = terrainAdapter.getPoiDebugConfig();
+      const showRoads = terrainAdapter.getShowRoads();
+      const lodDistances = terrainAdapter.getLodDistances();
+      const textureOptions = terrainAdapter.getTextureOptions();
+      const nextBuildVersion = ++buildVersion;
+
+      setBuildStatus({
+        phase: "world",
+        message: "Importing terrain asset",
+        completed: 0,
+        total: 1
+      });
+
+      terrainAdapter.dispose();
+      frameCameraToWorld(camera, nextTerrain.config);
+      terrain = nextTerrain;
+      terrainAdapter = createTerrainAdapter(
+        terrain,
+        textureOptions,
+        nextBuildVersion
+      );
+      terrainAdapter.initialize();
+      trackAdapterActivity(terrainAdapter, nextBuildVersion);
+      terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setCollisionRadius(collisionRadius);
+      terrainAdapter.setFoliageRadius(foliageRadius);
+      terrainAdapter.setShowFoliage(showFoliage);
+      terrainAdapter.setShowPoi(showPoi);
+      terrainAdapter.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
+      terrainAdapter.setPoiLabelsVisible(poiLabelsVisible);
+      terrainAdapter.setShowPoiFootprints(showPoiFootprints);
+      terrainAdapter.setPoiDebugConfig(poiDebugConfig);
+      terrainAdapter.setShowRoads(showRoads);
+      terrainAdapter.setLodDistances(lodDistances);
+      terrainAdapter.setWaterLevel(waterLevel);
+      terrainAdapter.setTerrainMaterialConfig(terrainMaterialConfig);
+      terrainAdapter.setWaterConfig(waterConfig);
+      terrainAdapter.setDebugViewMode(debugViewMode);
+      terrainAdapter.update(camera.position);
+      await Promise.all([
+        terrainAdapter.whenChunkMeshesReady(),
+        terrainAdapter.whenFoliageReady()
+      ]);
+      if (nextBuildVersion !== buildVersion) {
+        return;
+      }
+      setBuildStatus({
+        phase: "idle",
+        message: "",
+        completed: 0,
+        total: 0
+      });
+      lastCameraState = captureCameraState(camera);
+      renderController.markSceneMutated();
+    } finally {
+      renderSuspendToken.dispose();
+    }
+  };
+
   const mutateScene = <Args extends readonly unknown[]>(
     mutate: (...args: Args) => void
   ): ((...args: Args) => void) => {
@@ -499,6 +575,8 @@ export function createTerrainDemo(
     engine,
     scene,
     camera,
+    getTerrainAsset: () => terrain,
+    importTerrainAsset,
     beginRendering: () => renderController.beginRendering(),
     stopRendering: () => renderController.stopRendering(),
     suspendRendering: () => renderController.suspendRendering(),

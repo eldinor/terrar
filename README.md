@@ -180,3 +180,17 @@ npm run docs:api
 ```
 
 API docs are generated into `docs/typedoc/`.
+
+## Apache Deploy
+
+The build includes `dist/.htaccess` from `public/.htaccess` so Apache serves the demo with:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
+
+These headers are required for `SharedArrayBuffer` support in production. Make sure Apache has `mod_headers` enabled, for example:
+
+```apache
+a2enmod headers
+systemctl reload apache2
+```

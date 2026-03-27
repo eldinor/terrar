@@ -1,5 +1,5 @@
 import { BabylonTerrainDebugViewMode as TerrainDebugViewMode } from "../adapters/babylon";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import type {
   FeaturePanelState,
@@ -24,6 +24,7 @@ export function App() {
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
   const [presetName, setPresetName] = useState("");
   const [importText, setImportText] = useState("");
+  const terrainImportInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setSelectedPresetIndex((currentIndex) => {
@@ -63,6 +64,31 @@ export function App() {
 
   const handleExportPreset = (): void => {
     bridge?.exportPresetByIndex(selectedPresetIndex);
+  };
+
+  const handleExportTerrain = (): void => {
+    bridge?.exportTerrainBundle();
+  };
+
+  const handleImportTerrainClick = (): void => {
+    terrainImportInputRef.current?.click();
+  };
+
+  const handleImportTerrainFile = async (
+    event: ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!bridge || !file) {
+      return;
+    }
+
+    try {
+      const serialized = await file.text();
+      await bridge.importTerrainAssetText(serialized);
+    } catch {
+      // The demo bridge already publishes an import failure message.
+    }
   };
 
   const handleImportPresets = (): void => {
@@ -126,6 +152,15 @@ export function App() {
   return (
     <>
       <div id="app" />
+      <input
+        accept=".json,application/json"
+        onChange={(event) => {
+          void handleImportTerrainFile(event);
+        }}
+        ref={terrainImportInputRef}
+        style={{ display: "none" }}
+        type="file"
+      />
       {snapshot.headerActionsMount
         ? createPortal(
             <button
@@ -138,10 +173,37 @@ export function App() {
             snapshot.headerActionsMount,
           )
         : null}
+      {snapshot.headerTrailingActionsMount
+        ? createPortal(
+            <>
+              <button
+                className="editor-button editor-button-header"
+                onClick={handleExportTerrain}
+                type="button"
+              >
+                Export Terrain
+              </button>
+              <button
+                className="editor-button editor-button-header"
+                onClick={handleImportTerrainClick}
+                type="button"
+              >
+                Import Terrain
+              </button>
+            </>,
+            snapshot.headerTrailingActionsMount,
+          )
+        : null}
       {snapshot.footerMount
         ? createPortal(
-            <FooterStatus text={snapshot.hudText} />,
+            <FooterStatus statusText={snapshot.hudStatusText} text={snapshot.hudText} />,
             snapshot.footerMount,
+          )
+        : null}
+      {snapshot.footerPerformanceMount
+        ? createPortal(
+            <FooterPerformance text={snapshot.performanceText} />,
+            snapshot.footerPerformanceMount,
           )
         : null}
       {snapshot.featurePanelMount && snapshot.featurePanelState
@@ -162,6 +224,7 @@ export function App() {
               materialTabState={snapshot.materialTabState}
               onApply={handleApplyPreset}
               onExport={handleExportPreset}
+              onExportTerrain={handleExportTerrain}
               onImport={handleImportPresets}
               onImportTextChange={setImportText}
               onMaterialTabChange={handleMaterialTabChange}
@@ -189,8 +252,30 @@ export function App() {
   );
 }
 
-function FooterStatus({ text }: { readonly text: string }) {
-  return <div className="editor-footer-status">{text}</div>;
+function FooterStatus({
+  statusText,
+  text
+}: {
+  readonly statusText: string;
+  readonly text: string;
+}) {
+  if (!statusText) {
+    return <div className="editor-footer-status">{text}</div>;
+  }
+
+  const suffix = ` | ${statusText}`;
+  const baseText = text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
+
+  return (
+    <div className="editor-footer-status">
+      <span>{baseText}</span>
+      <span className="editor-footer-status-highlight">{suffix}</span>
+    </div>
+  );
+}
+
+function FooterPerformance({ text }: { readonly text: string }) {
+  return <div className="editor-footer-performance">{text}</div>;
 }
 
 function LeftPanel({
@@ -198,6 +283,7 @@ function LeftPanel({
   materialTabState,
   onApply,
   onExport,
+  onExportTerrain,
   onImport,
   onImportTextChange,
   onMaterialTabChange,
@@ -222,6 +308,7 @@ function LeftPanel({
   readonly materialTabState: MaterialTabState | null;
   readonly onApply: () => void | Promise<void>;
   readonly onExport: () => void;
+  readonly onExportTerrain: () => void;
   readonly onImport: () => void;
   readonly onImportTextChange: (value: string) => void;
   readonly onMaterialTabChange: (state: MaterialTabState) => void;
@@ -277,6 +364,7 @@ function LeftPanel({
           importText={presetsImportText}
           onApply={onApply}
           onExport={onExport}
+          onExportTerrain={onExportTerrain}
           onImport={onImport}
           onImportTextChange={onImportTextChange}
           onPresetNameChange={onPresetNameChange}
@@ -1054,6 +1142,7 @@ interface PresetsTabProps {
   readonly importText: string;
   readonly onApply: () => void | Promise<void>;
   readonly onExport: () => void;
+  readonly onExportTerrain: () => void;
   readonly onImport: () => void;
   readonly onImportTextChange: (value: string) => void;
   readonly onPresetNameChange: (value: string) => void;
@@ -1071,6 +1160,7 @@ function PresetsTab({
   importText,
   onApply,
   onExport,
+  onExportTerrain,
   onImport,
   onImportTextChange,
   onPresetNameChange,
@@ -1110,6 +1200,9 @@ function PresetsTab({
         disabled={presetOptions.length === 0}
       >
         Export {selectedPresetName || "Preset"}
+      </button>
+      <button className="editor-button" type="button" onClick={onExportTerrain}>
+        Export Terrain ZIP
       </button>
       <label className="editor-field-group">
         <div className="editor-label-muted">Save Current As</div>

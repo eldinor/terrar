@@ -77,6 +77,7 @@ export function buildHudText(args: {
   readonly loadingDebug: boolean;
   readonly poi: TerrainPoiStats;
   readonly roads: TerrainRoadStats;
+  readonly statusMessage?: string;
   readonly wireframe: boolean;
   readonly workerStatus: TerrainWorkerStatus;
 }): string {
@@ -87,13 +88,14 @@ export function buildHudText(args: {
       ? "sab:off"
       : "workers:off";
   const buildText = args.buildStatus.phase === "idle" ? "" : ` | build: ${args.buildStatus.message}`;
+  const statusText = args.statusMessage ? ` | ${args.statusMessage}` : "";
   return (
     `G debug: ${debugState} | V wireframe: ${args.wireframe ? "on" : "off"} | ` +
     `foliage: ${args.foliage.visibleInstances}/${args.foliage.totalInstances} ` +
     `(T ${args.foliage.visibleTrees}/${args.foliage.totalTrees}, ` +
     `B ${args.foliage.visibleBushes}/${args.foliage.totalBushes}, ` +
     `R ${args.foliage.visibleRocks}/${args.foliage.totalRocks}) | ` +
-    `poi: ${args.poi.total} | roads: ${args.roads.totalRoads} | ${workerText}${buildText}`
+    `poi: ${args.poi.total} | roads: ${args.roads.totalRoads} | ${workerText}${buildText}${statusText}`
   );
 }
 

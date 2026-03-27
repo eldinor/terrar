@@ -36,6 +36,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
+    "docs:api": "typedoc",
     "lint": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
@@ -50,6 +51,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.2.0",
+    "typedoc": "^0.28.18",
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "vitest": "^3.2.4"

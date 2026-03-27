@@ -1,5 +1,6 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
+import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -33,10 +34,15 @@ import { TerrainSystem } from "../terrain/TerrainSystem";
 import { TerrainChunkBuildProfile } from "../terrain/TerrainChunkMeshRuntime";
 import { TerrainFoliageStats } from "../terrain/TerrainFoliageSystem";
 
+/**
+ * Runtime API exposed by the interactive terrain demo.
+ */
 export interface TerrainDemo {
   readonly engine: Engine;
   readonly scene: Scene;
   readonly camera: ArcRotateCamera;
+  readonly getTerrainAsset: () => BuiltTerrain;
+  readonly importTerrainAsset: (terrain: BuiltTerrain) => Promise<void>;
   readonly beginRendering: () => void;
   readonly stopRendering: () => void;
   readonly suspendRendering: () => RenderSuspendToken;
@@ -87,10 +93,14 @@ export interface TerrainDemo {
   readonly subscribeBuildStatus: (
     listener: (status: TerrainBuildStatus) => void
   ) => () => void;
+  readonly getPerformanceStats: () => TerrainPerformanceStats;
   readonly getWorkerStatus: () => TerrainWorkerStatus;
   readonly getBuildProfile: () => TerrainBuildProfile;
 }
 
+/**
+ * Coarse-grained rebuild state for world generation and chunk application.
+ */
 export interface TerrainBuildStatus {
   readonly phase: "idle" | "world" | "chunks" | "error";
   readonly message: string;
@@ -98,6 +108,9 @@ export interface TerrainBuildStatus {
   readonly total: number;
 }
 
+/**
+ * Worker and chunk-pipeline health surfaced to the UI.
+ */
 export interface TerrainWorkerStatus {
   readonly workersEnabled: boolean;
   readonly sharedSnapshotsEnabled: boolean;
@@ -111,6 +124,9 @@ export interface TerrainWorkerStatus {
   readonly applyingChunkMeshes: boolean;
 }
 
+/**
+ * Timing measurements captured for the most recent terrain rebuild.
+ */
 export interface TerrainBuildProfile {
   readonly lastWorldBuildMs: number;
   readonly lastTerrainSwapMs: number;
@@ -119,33 +135,64 @@ export interface TerrainBuildProfile {
   readonly lastTotalRebuildMs: number;
 }
 
+/**
+ * Lazily sampled render statistics shown in the debug footer.
+ */
+export interface TerrainPerformanceStats {
+  readonly fps: number;
+  readonly drawCalls: number;
+  readonly meshes: number;
+  readonly activeMeshes: number;
+  readonly activeVertices: number;
+  readonly totalVertices: number;
+}
+
+/**
+ * Context passed to custom render policies when deciding whether to keep
+ * the Babylon render loop alive.
+ */
 export interface TerrainDemoRenderPolicyContext {
   readonly buildStatus: TerrainBuildStatus;
   readonly camera: ArcRotateCamera;
   readonly scene: Scene;
 }
 
+/**
+ * Optional tuning hooks for on-demand rendering in the demo.
+ */
 export interface TerrainDemoRenderPolicy {
   readonly forceReadyFrame?: boolean;
   readonly idleTimeoutMs?: number;
   readonly shouldRender?: (context: TerrainDemoRenderPolicyContext) => boolean;
 }
 
+/**
+ * Additional options for demo creation that do not belong to terrain config.
+ */
 export interface TerrainDemoOptions {
   readonly renderPolicy?: TerrainDemoRenderPolicy;
 }
 
+/**
+ * Shared render policy used by the browser demo when no overrides are provided.
+ */
 export const DEFAULT_DEMO_RENDER_POLICY: TerrainDemoRenderPolicy = {
   idleTimeoutMs: 250,
   forceReadyFrame: true
 };
 
+/**
+ * Resolves an optional render policy to the demo default.
+ */
 export function resolveTerrainDemoRenderPolicy(
   renderPolicy?: TerrainDemoRenderPolicy
 ): TerrainDemoRenderPolicy {
   return renderPolicy ?? DEFAULT_DEMO_RENDER_POLICY;
 }
 
+/**
+ * Creates the interactive Babylon-backed terrain demo and returns its control API.
+ */
 export function createTerrainDemo(
   canvas: HTMLCanvasElement,
   overrides: BuiltTerrainConfigOverrides = {},
@@ -166,10 +213,12 @@ export function createTerrainDemo(
   camera.lowerRadiusLimit = 140;
   camera.upperRadiusLimit = 2000;
   camera.wheelDeltaPercentage = 0.01;
+  camera.panningSensibility = 120;
   camera.attachControl(canvas, true);
 
   const light = new HemisphericLight("terrain-light", new Vector3(0.4, 1, 0.2), scene);
   light.intensity = 0.95;
+  const sceneInstrumentation = new SceneInstrumentation(scene);
   const workersEnabled = typeof Worker !== "undefined";
   const crossOriginIsolated = globalThis.crossOriginIsolated === true;
   const sharedArrayBufferDefined = typeof SharedArrayBuffer !== "undefined";
@@ -288,6 +337,11 @@ export function createTerrainDemo(
   );
   frameCameraToWorld(camera, terrainAdapter.getConfig());
   terrainAdapter.initialize();
+  terrainAdapter.setShowPoi(terrain.config.features.poi);
+  terrainAdapter.setPoiMarkerMeshesVisible(true);
+  terrainAdapter.setPoiLabelsVisible(true);
+  terrainAdapter.setShowPoiFootprints(true);
+  terrainAdapter.setShowRoads(terrain.config.features.roads);
   void terrainAdapter
     .whenChunkMeshesReady()
     .then(() => {
@@ -312,6 +366,7 @@ export function createTerrainDemo(
       }
     });
   terrainAdapter.update(camera.position);
+  sceneInstrumentation.captureFrameTime = true;
   renderController = createRenderController(engine, {
     forceReadyFrame: renderPolicy.forceReadyFrame,
     idleTimeoutMs: renderPolicy.idleTimeoutMs,
@@ -346,6 +401,7 @@ export function createTerrainDemo(
     beginInteractiveRendering();
   });
   window.addEventListener("beforeunload", () => {
+    sceneInstrumentation.dispose();
     buildCoordinator.dispose();
     chunkBuildCoordinator.dispose();
   });
@@ -486,6 +542,80 @@ export function createTerrainDemo(
     }
   };
 
+  const importTerrainAsset = async (nextTerrain: BuiltTerrain): Promise<void> => {
+    const renderSuspendToken = renderController.suspendRendering();
+    try {
+      const wireframe = terrainAdapter.getWireframe();
+      const debugViewMode = terrainAdapter.getDebugViewMode();
+      const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
+      const waterLevel = terrainAdapter.getWaterLevel();
+      const waterConfig = terrainAdapter.getWaterConfig();
+      const collisionRadius = terrainAdapter.getCollisionRadius();
+      const foliageRadius = terrainAdapter.getFoliageRadius();
+      const showFoliage = terrainAdapter.getShowFoliage();
+      const showPoi = terrainAdapter.getShowPoi();
+      const poiMarkerMeshesVisible = terrainAdapter.getPoiMarkerMeshesVisible();
+      const poiLabelsVisible = terrainAdapter.getPoiLabelsVisible();
+      const showPoiFootprints = terrainAdapter.getShowPoiFootprints();
+      const poiDebugConfig = terrainAdapter.getPoiDebugConfig();
+      const showRoads = terrainAdapter.getShowRoads();
+      const lodDistances = terrainAdapter.getLodDistances();
+      const textureOptions = terrainAdapter.getTextureOptions();
+      const nextBuildVersion = ++buildVersion;
+
+      setBuildStatus({
+        phase: "world",
+        message: "Importing terrain asset",
+        completed: 0,
+        total: 1
+      });
+
+      terrainAdapter.dispose();
+      frameCameraToWorld(camera, nextTerrain.config);
+      terrain = nextTerrain;
+      terrainAdapter = createTerrainAdapter(
+        terrain,
+        textureOptions,
+        nextBuildVersion
+      );
+      terrainAdapter.initialize();
+      trackAdapterActivity(terrainAdapter, nextBuildVersion);
+      terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setCollisionRadius(collisionRadius);
+      terrainAdapter.setFoliageRadius(foliageRadius);
+      terrainAdapter.setShowFoliage(showFoliage);
+      terrainAdapter.setShowPoi(showPoi);
+      terrainAdapter.setPoiMarkerMeshesVisible(poiMarkerMeshesVisible);
+      terrainAdapter.setPoiLabelsVisible(poiLabelsVisible);
+      terrainAdapter.setShowPoiFootprints(showPoiFootprints);
+      terrainAdapter.setPoiDebugConfig(poiDebugConfig);
+      terrainAdapter.setShowRoads(showRoads);
+      terrainAdapter.setLodDistances(lodDistances);
+      terrainAdapter.setWaterLevel(waterLevel);
+      terrainAdapter.setTerrainMaterialConfig(terrainMaterialConfig);
+      terrainAdapter.setWaterConfig(waterConfig);
+      terrainAdapter.setDebugViewMode(debugViewMode);
+      terrainAdapter.update(camera.position);
+      await Promise.all([
+        terrainAdapter.whenChunkMeshesReady(),
+        terrainAdapter.whenFoliageReady()
+      ]);
+      if (nextBuildVersion !== buildVersion) {
+        return;
+      }
+      setBuildStatus({
+        phase: "idle",
+        message: "",
+        completed: 0,
+        total: 0
+      });
+      lastCameraState = captureCameraState(camera);
+      renderController.markSceneMutated();
+    } finally {
+      renderSuspendToken.dispose();
+    }
+  };
+
   const mutateScene = <Args extends readonly unknown[]>(
     mutate: (...args: Args) => void
   ): ((...args: Args) => void) => {
@@ -499,6 +629,8 @@ export function createTerrainDemo(
     engine,
     scene,
     camera,
+    getTerrainAsset: () => terrain,
+    importTerrainAsset,
     beginRendering: () => renderController.beginRendering(),
     stopRendering: () => renderController.stopRendering(),
     suspendRendering: () => renderController.suspendRendering(),
@@ -585,6 +717,22 @@ export function createTerrainDemo(
       listener(buildStatus);
       return () => {
         buildStatusListeners.delete(listener);
+      };
+    },
+    getPerformanceStats: () => {
+      const activeMeshes = scene.getActiveMeshes();
+      let activeVertices = 0;
+      for (let index = 0; index < activeMeshes.length; index += 1) {
+        activeVertices += activeMeshes.data[index]?.getTotalVertices() ?? 0;
+      }
+
+      return {
+        fps: engine.getFps(),
+        drawCalls: sceneInstrumentation.drawCallsCounter.current,
+        meshes: scene.meshes.length,
+        activeMeshes: activeMeshes.length,
+        activeVertices,
+        totalVertices: scene.getTotalVertices()
       };
     },
     getWorkerStatus: () => ({

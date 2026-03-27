@@ -144,6 +144,11 @@ body {
   transform: translateY(-50%);
 }
 
+.demo-shell-header-actions-trailing {
+  left: auto;
+  right: 14px;
+}
+
 .demo-brand-picker {
   display: inline-flex;
   align-items: center;
@@ -189,6 +194,13 @@ body {
   min-width: 0;
 }
 
+.demo-brand-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
 .demo-brand-current {
   display: inline-flex;
   align-items: center;
@@ -222,6 +234,14 @@ body {
   letter-spacing: 0.16em;
 }
 
+.demo-brand-tag {
+  color: var(--editor-text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
 .demo-shell-footer {
   border-top: 1px solid rgba(49, 58, 67, 0.55);
   border-bottom: 0;
@@ -230,6 +250,15 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   text-transform: none;
   letter-spacing: 0;
+}
+
+.demo-shell-footer-content {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
 }
 
 .demo-shell-viewport {
@@ -677,6 +706,20 @@ body {
   white-space: nowrap;
   color: var(--editor-text-secondary);
   font: 11px/1.45 Consolas, "Courier New", monospace;
+}
+
+.editor-footer-status-highlight {
+  color: var(--editor-text);
+}
+
+.editor-footer-performance {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--editor-text-secondary);
+  font: 11px/1.45 Consolas, "Courier New", monospace;
+  text-align: right;
 }
 
 .editor-empty {

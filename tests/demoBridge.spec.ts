@@ -12,7 +12,11 @@ import { DEFAULT_TERRAIN_WATER_CONFIG } from "../src/terrain/TerrainWaterSystem"
 import type {
   FeaturePanelState,
 } from "../src/demo/demoSnapshots";
-import type { TerrainDemo, TerrainBuildStatus } from "../src/demo/createTerrainDemo";
+import type {
+  TerrainDemo,
+  TerrainBuildStatus,
+  TerrainPerformanceStats,
+} from "../src/demo/createTerrainDemo";
 import type { RenderSuspendToken } from "../src/adapters/babylon";
 
 class FakeElement {
@@ -142,6 +146,15 @@ const defaultBuildProfile = {
   lastTotalRebuildMs: 28,
 } as const;
 
+const defaultPerformanceStats: TerrainPerformanceStats = {
+  fps: 118,
+  drawCalls: 142,
+  meshes: 318,
+  activeMeshes: 96,
+  activeVertices: 1384200,
+  totalVertices: 2412300,
+};
+
 const noopSuspendToken: RenderSuspendToken = {
   dispose(): void {},
 };
@@ -187,6 +200,17 @@ function createTerrainDemoStub(): DemoStub {
     engine: {} as TerrainDemo["engine"],
     scene: {} as TerrainDemo["scene"],
     camera: {} as TerrainDemo["camera"],
+    getTerrainAsset: vi.fn(() => ({
+      config,
+      packedSnapshot: {
+        width: 1,
+        height: 1,
+        fields: {},
+      },
+      poiSites: [],
+      roads: [],
+    } as unknown as ReturnType<TerrainDemo["getTerrainAsset"]>)),
+    importTerrainAsset: vi.fn(async () => {}),
     beginRendering: vi.fn(),
     stopRendering: vi.fn(),
     suspendRendering: vi.fn(() => noopSuspendToken),
@@ -292,6 +316,7 @@ function createTerrainDemoStub(): DemoStub {
         listeners.delete(listener);
       };
     },
+    getPerformanceStats: () => ({ ...defaultPerformanceStats }),
     getWorkerStatus: () => ({ ...defaultWorkerStatus }),
     getBuildProfile: () => ({ ...defaultBuildProfile }),
     emitBuildStatus: (status: TerrainBuildStatus) => {
@@ -306,7 +331,9 @@ function installDom(): { document: FakeDocument } {
   const windowStub = {
     addEventListener: vi.fn(),
     setInterval: vi.fn(() => 1),
+    setTimeout: vi.fn(() => 1),
     clearInterval: vi.fn(),
+    clearTimeout: vi.fn(),
     localStorage: {
       getItem: vi.fn(() => null),
       setItem: vi.fn(),
@@ -342,11 +369,12 @@ describe("demo bridge", () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
     const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
     const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
 
     let notifications = 0;
     const unsubscribe = bridgeModule.subscribe(() => {
@@ -357,6 +385,9 @@ describe("demo bridge", () => {
     expect(initial.activePanelTab).toBe("runtime");
     expect(initial.leftPanelMount?.id).toBe("react-left-panel");
     expect(initial.featurePanelMount?.id).toBe("react-feature-panel");
+    expect(initial.footerPerformanceMount?.id).toBe("react-footer-performance");
+    expect(initial.performanceText).toContain("FPS 118");
+    expect(initial.performanceText).toContain("A-Vert 1.4M");
 
     bridgeModule.setActivePanelTab("material");
 
@@ -371,11 +402,12 @@ describe("demo bridge", () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
     const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
     const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
 
     const nextState: FeaturePanelState = {
       ...bridgeModule.getFeaturePanelState(),
@@ -407,11 +439,12 @@ describe("demo bridge", () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
     const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
     const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
 
     demo.emitBuildStatus({
       phase: "chunks",
@@ -429,11 +462,12 @@ describe("demo bridge", () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
     const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
     const footer = document.createElement("div") as unknown as HTMLDivElement;
     const panel = document.createElement("div") as unknown as HTMLDivElement;
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
-    bridgeModule.initializeDemoBridge({ demo, headerActions, footer, panel, featurePanel });
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
 
     const firstSnapshot = bridgeModule.getSnapshot();
     const secondSnapshot = bridgeModule.getSnapshot();
@@ -445,6 +479,115 @@ describe("demo bridge", () => {
     const thirdSnapshot = bridgeModule.getSnapshot();
     expect(thirdSnapshot).not.toBe(firstSnapshot);
     expect(thirdSnapshot.activePanelTab).toBe("material");
+  });
+
+  it("keeps world draft seed edits in the published snapshot", async () => {
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+
+    const initial = bridgeModule.getWorldTabState();
+    bridgeModule.setWorldTabState({
+      ...initial,
+      seed: "my-custom-seed",
+    });
+
+    expect(bridgeModule.getSnapshot().worldTabState?.seed).toBe("my-custom-seed");
+  });
+
+  it("shows a transient HUD message after browser terrain export", async () => {
+    vi.doMock("../src/builder", async () => {
+      const actual = await vi.importActual<typeof import("../src/builder")>("../src/builder");
+      return {
+        ...actual,
+        createTerrainExportBundle: vi.fn(() => ({
+          manifest: {},
+          terrainAsset: {},
+          terrainAssetJson: "{}",
+          maps: {},
+          poiData: {},
+          poiDataJson: "{}",
+          roadData: {},
+          roadDataJson: "{}",
+        })),
+        encodeTerrainExportFiles: vi.fn(() => ({
+          manifestJson: "{}",
+          terrainAssetJson: "{}",
+          poiDataJson: "{}",
+          roadDataJson: "{}",
+          mapFiles: {},
+          portableGraymapFiles: {},
+        })),
+        createTerrainExportZipBytes: vi.fn(() => new Uint8Array([1, 2, 3])),
+      };
+    });
+
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+    bridgeModule.exportTerrainBundle();
+
+    expect(window.URL.createObjectURL).toHaveBeenCalled();
+    expect(bridgeModule.getSnapshot().hudText).toContain("terrain zip downloaded");
+  });
+
+  it("imports a serialized terrain asset from text", async () => {
+    const importedTerrain = {
+      config: { ...DEFAULT_BUILT_TERRAIN_CONFIG },
+      packedSnapshot: {
+        analysisResolution: 1,
+        analysisStep: 1,
+        shared: false,
+        buffer: new ArrayBuffer(0),
+        fields: {
+          terrainHeightField: { byteOffset: 0, length: 0 },
+          flowField: { byteOffset: 0, length: 0 },
+          riverField: { byteOffset: 0, length: 0 },
+          lakeField: { byteOffset: 0, length: 0 },
+          lakeSurfaceField: { byteOffset: 0, length: 0 },
+          sedimentField: { byteOffset: 0, length: 0 },
+          coalField: { byteOffset: 0, length: 0 },
+          ironField: { byteOffset: 0, length: 0 },
+          copperField: { byteOffset: 0, length: 0 },
+        },
+      },
+      poiSites: [],
+      roads: [],
+    };
+
+    vi.doMock("../src/builder", async () => {
+      const actual = await vi.importActual<typeof import("../src/builder")>("../src/builder");
+      return {
+        ...actual,
+        deserializeTerrainAsset: vi.fn(() => importedTerrain),
+      };
+    });
+
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+    await bridgeModule.importTerrainAssetText('{"version":1}');
+
+    expect(demo.importTerrainAsset).toHaveBeenCalledWith(importedTerrain);
+    expect(bridgeModule.getSnapshot().hudText).toContain("terrain asset imported");
   });
 });
 

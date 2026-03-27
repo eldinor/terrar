@@ -53,7 +53,8 @@ export function packTerrainSnapshot(
     totalBytes += length * Float32Array.BYTES_PER_ELEMENT;
   });
 
-  const buffer = useSharedBuffer && typeof SharedArrayBuffer !== "undefined"
+  const sharedArrayBufferSupported = typeof SharedArrayBuffer !== "undefined";
+  const buffer = useSharedBuffer && sharedArrayBufferSupported
     ? new SharedArrayBuffer(totalBytes)
     : new ArrayBuffer(totalBytes);
   const packedBytes = new Uint8Array(buffer);
@@ -75,7 +76,7 @@ export function packTerrainSnapshot(
     analysisResolution: snapshot.analysisResolution,
     analysisStep: snapshot.analysisStep,
     buffer,
-    shared: buffer instanceof SharedArrayBuffer,
+    shared: sharedArrayBufferSupported && useSharedBuffer,
     fields
   };
 }

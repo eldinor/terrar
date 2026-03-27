@@ -1,11 +1,18 @@
+/**
+ * DOM mounts created for the demo canvas and React portals.
+ */
 export interface DemoShell {
   readonly canvas: HTMLCanvasElement;
   readonly headerActions: HTMLDivElement;
+  readonly headerTrailingActions: HTMLDivElement;
   readonly footer: HTMLDivElement;
   readonly leftPanel: HTMLDivElement;
   readonly featurePanel: HTMLDivElement;
 }
 
+/**
+ * Creates the static DOM shell that hosts the canvas and React portal roots.
+ */
 export function createDemoShell(): DemoShell {
   const mount = document.getElementById("app");
 
@@ -24,6 +31,10 @@ export function createDemoShell(): DemoShell {
   const headerActions = document.createElement("div");
   headerActions.className = "demo-shell-header-actions";
   header.appendChild(headerActions);
+
+  const headerTrailingActions = document.createElement("div");
+  headerTrailingActions.className = "demo-shell-header-actions demo-shell-header-actions-trailing";
+  header.appendChild(headerTrailingActions);
 
   shell.appendChild(header);
 
@@ -51,33 +62,75 @@ export function createDemoShell(): DemoShell {
   return {
     canvas,
     headerActions,
+    headerTrailingActions,
     footer,
     leftPanel,
     featurePanel,
   };
 }
 
+/**
+ * Creates the React mount used for the left control panel.
+ */
 export function createLeftPanelMount(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.id = "react-left-panel";
   return wrap;
 }
 
+/**
+ * Creates the React mount used for the right feature panel.
+ */
 export function createFeaturePanelMount(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.id = "react-feature-panel";
   return wrap;
 }
 
+/**
+ * Creates the footer wrapper that holds both HUD and performance portal mounts.
+ */
 export function createFooterMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "demo-shell-footer-content";
+  wrap.appendChild(createFooterStatusMount());
+  wrap.appendChild(createFooterPerformanceMount());
+  return wrap;
+}
+
+/**
+ * Creates the React mount used for left-aligned footer status text.
+ */
+export function createFooterStatusMount(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.id = "react-footer-status";
   return wrap;
 }
 
+/**
+ * Creates the React mount used for right-aligned footer performance stats.
+ */
+export function createFooterPerformanceMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-footer-performance";
+  return wrap;
+}
+
+/**
+ * Creates the React mount used for the primary header action group.
+ */
 export function createHeaderActionsMount(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.id = "react-header-actions";
+  return wrap;
+}
+
+/**
+ * Creates the React mount used for trailing header actions.
+ */
+export function createHeaderTrailingActionsMount(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.id = "react-header-actions-trailing";
   return wrap;
 }
 
@@ -122,7 +175,16 @@ function createBrandLockup(): HTMLElement {
   suffix.textContent = "ERRAR";
   label.appendChild(suffix);
 
-  brand.appendChild(label);
+  const productTag = document.createElement("span");
+  productTag.className = "demo-brand-tag";
+  productTag.textContent = "builder";
+
+  const textWrap = document.createElement("span");
+  textWrap.className = "demo-brand-text";
+  textWrap.appendChild(label);
+  textWrap.appendChild(productTag);
+
+  brand.appendChild(textWrap);
 
   wrap.appendChild(brand);
 

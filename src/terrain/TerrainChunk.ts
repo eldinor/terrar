@@ -1,4 +1,5 @@
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
+import { BoundingBox } from "@babylonjs/core/Culling/boundingBox";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Scene } from "@babylonjs/core/scene";
@@ -11,6 +12,7 @@ export class TerrainChunk {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly centerHeight: number;
+  private readonly frustumVectors: Vector3[];
   private readonly meshes = new Map<TerrainLODLevel, Mesh>();
   private activeLod: TerrainLODLevel | null = null;
   private collisionsEnabled = false;
@@ -25,6 +27,7 @@ export class TerrainChunk {
     this.centerHeight = data.centerHeight;
     this.chunkX = data.chunkX;
     this.chunkZ = data.chunkZ;
+    this.frustumVectors = createChunkFrustumVectors(data, config);
   }
 
   initializeMeshes(): void {
@@ -66,17 +69,7 @@ export class TerrainChunk {
   }
 
   isInFrustum(frustumPlanes: Parameters<Mesh["isInFrustum"]>[0]): boolean {
-    const activeMesh =
-      this.meshes.get(this.getLOD()) ??
-      this.meshes.get(0) ??
-      this.meshes.get(1) ??
-      this.meshes.get(2) ??
-      this.meshes.get(3);
-    if (!activeMesh) {
-      return true;
-    }
-
-    return activeMesh.isInFrustum(frustumPlanes);
+    return BoundingBox.IsInFrustum(this.frustumVectors, frustumPlanes);
   }
 
   setLOD(lod: TerrainLODLevel): void {
@@ -108,4 +101,23 @@ export class TerrainChunk {
     this.meshes.forEach((mesh) => mesh.dispose(false, true));
     this.meshes.clear();
   }
+}
+
+function createChunkFrustumVectors(
+  data: TerrainChunkData,
+  config: TerrainConfig
+): Vector3[] {
+  const minY = Math.min(config.baseHeight, config.waterLevel) - config.skirtDepth;
+  const maxY = Math.max(config.maxHeight, config.waterLevel) + config.skirtDepth;
+
+  return [
+    new Vector3(data.minX, minY, data.minZ),
+    new Vector3(data.maxX, maxY, data.maxZ),
+    new Vector3(data.maxX, minY, data.minZ),
+    new Vector3(data.minX, maxY, data.minZ),
+    new Vector3(data.minX, minY, data.maxZ),
+    new Vector3(data.maxX, maxY, data.minZ),
+    new Vector3(data.minX, maxY, data.maxZ),
+    new Vector3(data.maxX, minY, data.maxZ)
+  ];
 }

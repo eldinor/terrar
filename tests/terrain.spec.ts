@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import { Plane } from "@babylonjs/core/Maths/math.plane";
 import { Scene } from "@babylonjs/core/scene";
 import { ProceduralGenerator } from "../src/terrain/ProceduralGenerator";
 import { TerrainChunk } from "../src/terrain/TerrainChunk";
@@ -266,6 +267,49 @@ describe("Chunk border continuity", () => {
 
     expect(chunk.minX + (lod0.resolution - 1) * lod0.step).toBe(chunk.maxX);
     expect(chunk.minZ + (lod3.resolution - 1) * lod3.step).toBe(chunk.maxZ);
+  });
+
+  it("uses conservative chunk bounds for frustum checks before mesh LOD bounds", () => {
+    const config = mergeTerrainConfig({
+      worldMin: -32,
+      worldMax: 32,
+      chunksPerAxis: 2,
+      chunkSize: 32,
+      baseHeight: 0,
+      maxHeight: 120,
+      skirtDepth: 8,
+      erosion: { enabled: false },
+      rivers: { enabled: false },
+      features: { poi: false, roads: false }
+    });
+    const generator = new ProceduralGenerator(config);
+    const chunkData = new TerrainChunkData(0, 0, config, generator);
+    const chunk = new TerrainChunk(
+      {} as never,
+      chunkData,
+      {} as never,
+      config
+    );
+
+    const broadPlanes = [
+      new Plane(1, 0, 0, 1000),
+      new Plane(-1, 0, 0, 1000),
+      new Plane(0, 0, 1, 1000),
+      new Plane(0, 0, -1, 1000),
+      new Plane(0, 1, 0, -110),
+      new Plane(0, -1, 0, 1000)
+    ];
+    const outsidePlanes = [
+      new Plane(1, 0, 0, -10),
+      new Plane(-1, 0, 0, 1000),
+      new Plane(0, 0, 1, 1000),
+      new Plane(0, 0, -1, 1000),
+      new Plane(0, 1, 0, 1000),
+      new Plane(0, -1, 0, 1000)
+    ];
+
+    expect(chunk.isInFrustum(broadPlanes)).toBe(true);
+    expect(chunk.isInFrustum(outsidePlanes)).toBe(false);
   });
 });
 

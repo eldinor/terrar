@@ -1,11 +1,23 @@
 {
   "name": "terrar",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "files": [
     "dist"
   ],
+  "author": {
+    "name": "Andrei Stepanov",
+    "email": "eldinor@gmail.com",
+    "url": "https://babylonpress.org/"
+  },
+  "homepage": "https://terrar.babylonpress.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eldinor/terrar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eldinor/terrar/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/main.d.ts",
@@ -27,18 +39,20 @@
       "types": "./dist/babylon.d.ts",
       "import": "./dist/babylon.js"
     },
-    "./demo": {
-      "types": "./dist/demo-api.d.ts",
-      "import": "./dist/demo-api.js"
-    },
     "./package.json": "./package.json"
   },
   "scripts": {
+    "build": "node scripts/clean-package.mjs && vite build --mode package && tsc -p tsconfig.package.json --emitDeclarationOnly",
+    "build:demo": "vite build",
+    "build:consumer": "npm --prefix examples/consume-dist run build",
+    "consumer": "npm --prefix examples/consume-dist run dev --",
+    "demo": "vite",
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
     "docs:api": "typedoc",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "preview": "vite preview",
+    "prepack": "npm run build",
+    "preview:demo": "vite preview --outDir dist-demo",
+    "preview:consumer": "npm --prefix examples/consume-dist run preview",
     "test": "vitest run",
     "export:terrain": "node dist/builder-cli.js"
   },

@@ -7,6 +7,7 @@ import { TerrainLODController } from "./TerrainLODController";
 export class TerrainChunkVisibilityRuntime {
   private lodDistances: [number, number, number];
   private collisionRadius: number;
+  private forceLod0 = false;
 
   constructor(
     private readonly scene: Scene,
@@ -33,6 +34,7 @@ export class TerrainChunkVisibilityRuntime {
       for (let chunkX = 0; chunkX < this.config.chunksPerAxis; chunkX += 1) {
         const chunk = this.chunkGrid[chunkZ][chunkX];
         const distance = chunk.distanceTo(cameraPosition);
+        const lodDistance = this.getLodDistance(distance, cameraPosition);
         const isInFrustum =
           !frustumPlanes ||
           frustumPlanes.length === 0 ||
@@ -40,9 +42,11 @@ export class TerrainChunkVisibilityRuntime {
         distanceRow.push(distance);
         frustumRow.push(isInFrustum);
         row.push(
-          isInFrustum || distance < offscreenLodDistance
-            ? this.getDesiredLod(distance)
-            : 3
+          this.forceLod0
+            ? 0
+            : isInFrustum || lodDistance < offscreenLodDistance
+              ? this.getDesiredLod(lodDistance)
+              : 3
         );
       }
 
@@ -59,7 +63,7 @@ export class TerrainChunkVisibilityRuntime {
         const distance = chunkDistances[chunkZ][chunkX];
         const isInFrustum = chunkFrustumStates[chunkZ][chunkX];
         chunk.setLOD(
-          isInFrustum || distance < offscreenLodDistance
+          this.forceLod0 || isInFrustum || distance < offscreenLodDistance
             ? stabilized[chunkZ][chunkX]
             : 3
         );
@@ -84,6 +88,14 @@ export class TerrainChunkVisibilityRuntime {
     return this.lodDistances;
   }
 
+  setForceLod0(enabled: boolean): void {
+    this.forceLod0 = enabled;
+  }
+
+  getForceLod0(): boolean {
+    return this.forceLod0;
+  }
+
   private getDesiredLod(distance: number): TerrainLODLevel {
     const [lod0Distance, lod1Distance, lod2Distance] = this.lodDistances;
 
@@ -101,4 +113,22 @@ export class TerrainChunkVisibilityRuntime {
 
     return 3;
   }
+
+  private getLodDistance(distance: number, cameraPosition: Vector3): number {
+    const altitude = Math.max(0, cameraPosition.y - this.config.waterLevel);
+    const overviewBlend = smoothStep(
+      this.config.chunkSize * 1.2,
+      this.config.worldSize * 0.75,
+      altitude
+    );
+    return distance * (1 - overviewBlend * 0.62);
+  }
+}
+
+function smoothStep(min: number, max: number, value: number): number {
+  if (max <= min) {
+    return value >= max ? 1 : 0;
+  }
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  return t * t * (3 - 2 * t);
 }

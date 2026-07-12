@@ -2,8 +2,10 @@ import type { TerrainDemo } from "./createTerrainDemo";
 import {
   createTerrainExportBundle,
   createTerrainExportZipBytes,
+  createTerrainHeightmap,
   deserializeTerrainAsset,
   encodeTerrainExportFiles,
+  encodeGrayscalePng,
 } from "../builder";
 import {
   createFeaturePanelMount,
@@ -71,6 +73,7 @@ export interface DemoBridge {
   subscribe(listener: () => void): () => void;
   applyPresetByIndex(index: number): Promise<void>;
   exportTerrainBundle(): void;
+  exportTerrainHeightmap(): void;
   importTerrainAssetText(serialized: string): Promise<void>;
   saveCurrentPreset(name: string): void;
   exportPresetByIndex(index: number): void;
@@ -82,6 +85,7 @@ export interface DemoBridge {
   setFeaturePanelState(state: FeaturePanelState): void;
   setMaterialTabState(state: MaterialTabState): void;
   setRuntimeTabState(state: RuntimeTabState): void;
+  setForceLod0(enabled: boolean): void;
   setWorldTabState(state: WorldTabState): void;
 }
 
@@ -350,6 +354,10 @@ export function setRuntimeTabState(state: RuntimeTabState): void {
   renderHud();
 }
 
+export function setForceLod0(enabled: boolean): void {
+  requireContext().demo.setForceLod0(enabled);
+}
+
 export function setMaterialTabState(state: MaterialTabState): void {
   const current = requireContext();
   const currentDraft = requireDraftConfig();
@@ -503,6 +511,25 @@ export function exportTerrainBundle(): void {
   } catch (error) {
     console.error(error);
     setTransientHudMessage("terrain export failed");
+  }
+}
+
+/**
+ * Exports the current terrain heightmap as a grayscale PNG.
+ */
+export function exportTerrainHeightmap(): void {
+  try {
+    const terrain = requireContext().demo.getTerrainAsset();
+    const heightmap = createTerrainHeightmap(terrain);
+    downloadBinaryFile(
+      `${slugifyPresetName(`terrain-${terrain.config.seed}`)}-heightmap.png`,
+      encodeGrayscalePng(heightmap),
+      "image/png",
+    );
+    setTransientHudMessage("heightmap downloaded");
+  } catch (error) {
+    console.error(error);
+    setTransientHudMessage("heightmap export failed");
   }
 }
 

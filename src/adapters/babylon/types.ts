@@ -109,6 +109,8 @@ export interface BabylonTerrainAdapter {
   getShowRoads(): boolean;
   setLodDistances(distances: readonly [number, number, number]): void;
   getLodDistances(): readonly [number, number, number];
+  setForceLod0(enabled: boolean): void;
+  getForceLod0(): boolean;
   getConfig(): BuiltTerrainConfig;
   getTextureOptions(): Required<BabylonTerrainTextureOptions>;
   getFoliageStats(): TerrainFoliageStats;

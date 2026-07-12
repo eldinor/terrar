@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
+import { Plane } from "@babylonjs/core/Maths/math.plane";
 import { Scene } from "@babylonjs/core/scene";
 import { ProceduralGenerator } from "../src/terrain/ProceduralGenerator";
 import { TerrainChunk } from "../src/terrain/TerrainChunk";
 import { TerrainChunkData } from "../src/terrain/TerrainChunkData";
+import { TerrainMeshBuilder } from "../src/terrain/TerrainMeshBuilder";
 import {
   DEFAULT_TERRAIN_CONFIG,
   mergeTerrainConfig,
@@ -266,6 +268,80 @@ describe("Chunk border continuity", () => {
 
     expect(chunk.minX + (lod0.resolution - 1) * lod0.step).toBe(chunk.maxX);
     expect(chunk.minZ + (lod3.resolution - 1) * lod3.step).toBe(chunk.maxZ);
+  });
+
+  it("keeps mesh normals stable across terrain LODs", () => {
+    const config = mergeTerrainConfig({
+      seed: "lod-normal-stability",
+      worldMin: -128,
+      worldMax: 128,
+      chunksPerAxis: 4,
+      chunkSize: 64,
+      erosion: { enabled: false },
+      rivers: { enabled: false },
+      features: { poi: false, roads: false }
+    });
+    const generator = new ProceduralGenerator(config);
+    const chunk = new TerrainChunkData(1, 1, config, generator);
+    const lod0 = TerrainMeshBuilder.createChunkMeshData(chunk, 0, config);
+    const lod3 = TerrainMeshBuilder.createChunkMeshData(chunk, 3, config);
+    const lod0Resolution = config.lodResolutions[0];
+    const lod3Resolution = config.lodResolutions[3];
+    const lod0CenterIndex =
+      Math.floor(lod0Resolution / 2) * lod0Resolution +
+      Math.floor(lod0Resolution / 2);
+    const lod3CenterIndex =
+      Math.floor(lod3Resolution / 2) * lod3Resolution +
+      Math.floor(lod3Resolution / 2);
+    const lod0Normal = readNormal(lod0.normals, lod0CenterIndex);
+    const lod3Normal = readNormal(lod3.normals, lod3CenterIndex);
+
+    expect(lod3Normal.x).toBeCloseTo(lod0Normal.x, 5);
+    expect(lod3Normal.y).toBeCloseTo(lod0Normal.y, 5);
+    expect(lod3Normal.z).toBeCloseTo(lod0Normal.z, 5);
+  });
+
+  it("uses conservative chunk bounds for frustum checks before mesh LOD bounds", () => {
+    const config = mergeTerrainConfig({
+      worldMin: -32,
+      worldMax: 32,
+      chunksPerAxis: 2,
+      chunkSize: 32,
+      baseHeight: 0,
+      maxHeight: 120,
+      skirtDepth: 8,
+      erosion: { enabled: false },
+      rivers: { enabled: false },
+      features: { poi: false, roads: false }
+    });
+    const generator = new ProceduralGenerator(config);
+    const chunkData = new TerrainChunkData(0, 0, config, generator);
+    const chunk = new TerrainChunk(
+      {} as never,
+      chunkData,
+      {} as never,
+      config
+    );
+
+    const broadPlanes = [
+      new Plane(1, 0, 0, 1000),
+      new Plane(-1, 0, 0, 1000),
+      new Plane(0, 0, 1, 1000),
+      new Plane(0, 0, -1, 1000),
+      new Plane(0, 1, 0, -110),
+      new Plane(0, -1, 0, 1000)
+    ];
+    const outsidePlanes = [
+      new Plane(1, 0, 0, -10),
+      new Plane(-1, 0, 0, 1000),
+      new Plane(0, 0, 1, 1000),
+      new Plane(0, 0, -1, 1000),
+      new Plane(0, 1, 0, 1000),
+      new Plane(0, -1, 0, 1000)
+    ];
+
+    expect(chunk.isInFrustum(broadPlanes)).toBe(true);
+    expect(chunk.isInFrustum(outsidePlanes)).toBe(false);
   });
 });
 
@@ -728,4 +804,16 @@ function estimateSiteSlope(
   const gradX = (right - left) / (step * 2);
   const gradZ = (up - down) / (step * 2);
   return Math.sqrt(gradX * gradX + gradZ * gradZ);
+}
+
+function readNormal(
+  normals: Float32Array,
+  vertexIndex: number
+): { readonly x: number; readonly y: number; readonly z: number } {
+  const offset = vertexIndex * 3;
+  return {
+    x: normals[offset],
+    y: normals[offset + 1],
+    z: normals[offset + 2]
+  };
 }

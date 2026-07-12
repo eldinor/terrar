@@ -71,6 +71,8 @@ export interface TerrainDemo {
   readonly getShowRoads: () => boolean;
   readonly setLodDistances: (distances: readonly [number, number, number]) => void;
   readonly getLodDistances: () => readonly [number, number, number];
+  readonly setForceLod0: (enabled: boolean) => void;
+  readonly getForceLod0: () => boolean;
   readonly setDebugViewMode: (mode: BabylonTerrainDebugViewMode) => void;
   readonly getDebugViewMode: () => BabylonTerrainDebugViewMode;
   readonly setTerrainMaterialConfig: (config: BabylonTerrainMaterialConfig) => void;
@@ -678,6 +680,8 @@ export function createTerrainDemo(
       terrainAdapter.setLodDistances(distances),
     ),
     getLodDistances: () => terrainAdapter.getLodDistances(),
+    setForceLod0: mutateScene((enabled: boolean) => terrainAdapter.setForceLod0(enabled)),
+    getForceLod0: () => terrainAdapter.getForceLod0(),
     setDebugViewMode: mutateScene((mode: BabylonTerrainDebugViewMode) =>
       terrainAdapter.setDebugViewMode(mode),
     ),

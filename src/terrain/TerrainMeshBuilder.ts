@@ -124,6 +124,7 @@ export class TerrainMeshBuilder {
       iron,
       copper
     } = grid;
+    const normalSampleStep = config.chunkSize / (config.lodResolutions[0] - 1);
 
     for (let z = 0; z < resolution; z += 1) {
       for (let x = 0; x < resolution; x += 1) {
@@ -133,7 +134,7 @@ export class TerrainMeshBuilder {
         const height = heights[index];
         const rawHeight = rawHeights[index];
         const erosionDelta = erosionDeltas[index];
-        const normal = chunkData.sampleSurfaceNormal(worldX, worldZ, step);
+        const normal = chunkData.sampleSurfaceNormal(worldX, worldZ, normalSampleStep);
         positions.push(worldX, height, worldZ);
         uvs.push(x / (resolution - 1), z / (resolution - 1));
         uvs2.push(

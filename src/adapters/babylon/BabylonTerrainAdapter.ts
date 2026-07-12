@@ -177,6 +177,14 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getLodDistances();
   }
 
+  setForceLod0(enabled: boolean): void {
+    this.terrainSystem.setForceLod0(enabled);
+  }
+
+  getForceLod0(): boolean {
+    return this.terrainSystem.getForceLod0();
+  }
+
   getConfig() {
     return this.terrainSystem.getConfig();
   }

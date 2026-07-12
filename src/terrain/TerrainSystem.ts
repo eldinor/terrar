@@ -328,6 +328,14 @@ export class TerrainSystem {
     return this.visibilityRuntime?.getLodDistances() ?? this.config.lodDistances;
   }
 
+  setForceLod0(enabled: boolean): void {
+    this.visibilityRuntime?.setForceLod0(enabled);
+  }
+
+  getForceLod0(): boolean {
+    return this.visibilityRuntime?.getForceLod0() ?? false;
+  }
+
   getConfig(): TerrainConfig {
     return this.config;
   }

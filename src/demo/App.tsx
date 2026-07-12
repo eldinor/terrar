@@ -24,6 +24,7 @@ export function App() {
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
   const [presetName, setPresetName] = useState("");
   const [importText, setImportText] = useState("");
+  const [forceLod0, setForceLod0] = useState(false);
   const terrainImportInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -68,6 +69,10 @@ export function App() {
 
   const handleExportTerrain = (): void => {
     bridge?.exportTerrainBundle();
+  };
+
+  const handleExportHeightmap = (): void => {
+    bridge?.exportTerrainHeightmap();
   };
 
   const handleImportTerrainClick = (): void => {
@@ -149,6 +154,12 @@ export function App() {
     bridge.retuneWorldTabForWorldSize();
   };
 
+  const handleForceLod0 = (): void => {
+    const nextValue = !forceLod0;
+    bridge?.setForceLod0(nextValue);
+    setForceLod0(nextValue);
+  };
+
   return (
     <>
       <div id="app" />
@@ -185,10 +196,24 @@ export function App() {
               </button>
               <button
                 className="editor-button editor-button-header"
+                onClick={handleExportHeightmap}
+                type="button"
+              >
+                Export Heightmap
+              </button>
+              <button
+                className="editor-button editor-button-header"
                 onClick={handleImportTerrainClick}
                 type="button"
               >
                 Import Terrain
+              </button>
+              <button
+                className={cx("editor-button", "editor-button-header", forceLod0 && "is-active")}
+                onClick={handleForceLod0}
+                type="button"
+              >
+                {forceLod0 ? "LOD 0: On" : "Force LOD 0"}
               </button>
             </>,
             snapshot.headerTrailingActionsMount,
@@ -1049,20 +1074,53 @@ function SliderField({
   readonly step: number;
   readonly value: number;
 }) {
+  const [draftValue, setDraftValue] = useState(value);
+  const isDraggingRef = useRef(false);
+  const draftValueRef = useRef(value);
+  const lastCommittedValueRef = useRef(value);
+
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      setDraftValue(value);
+      draftValueRef.current = value;
+      lastCommittedValueRef.current = value;
+    }
+  }, [value]);
+
+  const commitDraftValue = (): void => {
+    isDraggingRef.current = false;
+    const nextValue = draftValueRef.current;
+    if (nextValue === lastCommittedValueRef.current) {
+      return;
+    }
+    lastCommittedValueRef.current = nextValue;
+    onChange(nextValue);
+  };
+
   return (
     <label className="editor-range-wrap">
       <div className="editor-range-label">
         <span>{label}</span>
-        <span className="editor-range-value">{formatValue(value, step)}</span>
+        <span className="editor-range-value">{formatValue(draftValue, step)}</span>
       </div>
       <input
         className="editor-range"
         max={String(max)}
         min={String(min)}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onBlur={commitDraftValue}
+        onChange={(event) => {
+          const nextValue = Number(event.target.value);
+          draftValueRef.current = nextValue;
+          setDraftValue(nextValue);
+        }}
+        onKeyUp={commitDraftValue}
+        onPointerDown={() => {
+          isDraggingRef.current = true;
+        }}
+        onPointerUp={commitDraftValue}
         step={String(step)}
         type="range"
-        value={String(value)}
+        value={String(draftValue)}
       />
     </label>
   );

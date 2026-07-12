@@ -444,12 +444,23 @@ function ensureTerrainBlendShadersRegistered(): void {
       return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
     }
 
+    float valueNoise2(vec2 p) {
+      vec2 cell = floor(p);
+      vec2 local = fract(p);
+      vec2 curve = local * local * (3.0 - 2.0 * local);
+      float a = hash12(cell);
+      float b = hash12(cell + vec2(1.0, 0.0));
+      float c = hash12(cell + vec2(0.0, 1.0));
+      float d = hash12(cell + vec2(1.0, 1.0));
+      return mix(mix(a, b, curve.x), mix(c, d, curve.x), curve.y);
+    }
+
     vec4 samplePlanarXZ(sampler2D tex, vec3 worldPos, float scale) {
       vec2 baseUv = worldPos.xz * scale;
-      vec2 macroCell = floor(worldPos.xz * (scale * 0.18));
-      float noiseA = hash12(macroCell + vec2(3.1, 7.9));
-      float noiseB = hash12(macroCell + vec2(11.4, 1.7));
-      float blend = smoothstep(0.25, 0.75, hash12(macroCell + vec2(5.3, 9.2)));
+      vec2 macroUv = worldPos.xz * (scale * 0.18);
+      float noiseA = valueNoise2(macroUv + vec2(3.1, 7.9));
+      float noiseB = valueNoise2(macroUv + vec2(11.4, 1.7));
+      float blend = smoothstep(0.25, 0.75, valueNoise2(macroUv + vec2(5.3, 9.2)));
 
       vec2 uvA = rotate2d(
         baseUv + vec2(noiseA, noiseB) * (0.73 * antiTileStrength),
@@ -752,8 +763,8 @@ function createLayerTexture(
     false,
     Texture.TRILINEAR_SAMPLINGMODE
   );
-  texture.wrapU = Texture.WRAP_ADDRESSMODE;
-  texture.wrapV = Texture.WRAP_ADDRESSMODE;
+  texture.wrapU = Texture.MIRROR_ADDRESSMODE;
+  texture.wrapV = Texture.MIRROR_ADDRESSMODE;
   return texture;
 }
 

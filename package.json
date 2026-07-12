@@ -18,6 +18,9 @@
   "bugs": {
     "url": "https://github.com/eldinor/terrar/issues"
   },
+  "peerDependencies": {
+    "@babylonjs/core": "^9.16.1"
+  },
   "exports": {
     ".": {
       "types": "./dist/main.d.ts",
@@ -57,13 +60,13 @@
     "export:terrain": "node dist/builder-cli.js"
   },
   "dependencies": {
-    "@babylonjs/core": "8.54.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@babylonjs/core": "9.16.1",
     "@vitejs/plugin-react": "^5.2.0",
     "typedoc": "^0.28.18",
     "typescript": "^5.9.2",

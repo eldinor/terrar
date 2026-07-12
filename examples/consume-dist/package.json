@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@babylonjs/core": "8.54.3",
+    "@babylonjs/core": "9.16.1",
     "terrar": "file:../.."
   },
   "devDependencies": {

@@ -1,11 +1,7 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import "@babylonjs/core/Culling/ray";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { buildTerrain } from "terrar/builder";
 import { renderTerrainAsset } from "terrar/babylon";
@@ -21,7 +17,7 @@ console.info("[terrar consumer] canvas found", canvas.clientWidth, canvas.client
 const engine = new Engine(canvas, true);
 const scene = new Scene(engine);
 engine.resize();
-scene.clearColor.set(0.9, 0.05, 0.35, 1);
+scene.clearColor.set(0.05, 0.07, 0.11, 1);
 scene.forceShowBoundingBoxes = true;
 console.info("[terrar consumer] Babylon engine and scene created", {
   canvasSize: [canvas.width, canvas.height],
@@ -32,7 +28,7 @@ const camera = new ArcRotateCamera(
   "camera",
   -Math.PI * 0.25,
   Math.PI * 0.18,
-  900,
+  520,
   new Vector3(0, 60, 0),
   scene
 );
@@ -43,15 +39,6 @@ scene.activeCamera = camera;
 console.info("[terrar consumer] camera active", camera.position.asArray());
 
 new HemisphericLight("sky", new Vector3(0.25, 1, 0.15), scene).intensity = 1.1;
-
-const marker = MeshBuilder.CreateBox("consumer-marker", { size: 32 }, scene);
-const forwardRay = camera.getForwardRay();
-marker.position.copyFrom(forwardRay.origin.add(forwardRay.direction.scale(120)));
-const markerMaterial = new StandardMaterial("consumer-marker-material", scene);
-markerMaterial.emissiveColor = new Color3(1, 0, 0);
-markerMaterial.disableDepthWrite = true;
-marker.material = markerMaterial;
-console.info("[terrar consumer] red scene marker created");
 
 console.info("[terrar consumer] building terrain asset");
 const terrain = buildTerrain({

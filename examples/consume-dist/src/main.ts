@@ -17,7 +17,7 @@ console.info("[terrar consumer] canvas found", canvas.clientWidth, canvas.client
 const engine = new Engine(canvas, true);
 const scene = new Scene(engine);
 engine.resize();
-scene.clearColor.set(0.9, 0.05, 0.35, 1);
+scene.clearColor.set(0.05, 0.07, 0.11, 1);
 scene.forceShowBoundingBoxes = true;
 console.info("[terrar consumer] Babylon engine and scene created", {
   canvasSize: [canvas.width, canvas.height],
@@ -28,7 +28,7 @@ const camera = new ArcRotateCamera(
   "camera",
   -Math.PI * 0.25,
   Math.PI * 0.18,
-  900,
+  520,
   new Vector3(0, 60, 0),
   scene
 );

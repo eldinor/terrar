@@ -1,10 +1,11 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { ArcRotateCameraPointersInput } from "@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput";
+import "@babylonjs/core/Culling/ray";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Scene } from "@babylonjs/core/scene";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
@@ -59,6 +60,13 @@ export interface TerrainEditorSettings {
   readonly brush: TerrainBrushSettings;
 }
 
+interface TerrainEditorBounds {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
 /**
  * Runtime API exposed by the interactive terrain demo.
  */
@@ -73,6 +81,8 @@ export interface TerrainDemo {
   readonly setEditorSettings: (settings: TerrainEditorSettings) => void;
   readonly getEditorSettings: () => TerrainEditorSettings;
   readonly flushTerrainEdits: () => Promise<void>;
+  readonly applyTerrainEditChanges: () => void;
+  readonly getEditorDerivedDirty: () => boolean;
   readonly importTerrainAsset: (terrain: BuiltTerrain) => Promise<void>;
   readonly beginRendering: () => void;
   readonly stopRendering: () => void;
@@ -416,16 +426,19 @@ export function createTerrainDemo(
     brush: { radius: 40, strength: 1, hardness: 0 }
   };
   let editorPointerActive = false;
+  let editorInputLocked = false;
+  let editorLastEditPoint: { x: number; z: number } | null = null;
   let editorNavigationButton: 1 | 2 | null = null;
   let editorNavigationPointerId: number | null = null;
   let editorNavigationX = 0;
   let editorNavigationY = 0;
   let editorRectangleStart: { x: number; z: number } | null = null;
-  let editorRefreshTimeout: number | null = null;
   let editorRefreshPromise: Promise<void> = Promise.resolve();
   let lastDerivedEditorRevision = 0;
+  let editorDerivedDirty = false;
   const cursorPointCount = 65;
   let editorCursor: LinesMesh | null = null;
+  let editorBrushRing: Mesh | null = null;
   let editorSelectionMesh: Mesh | null = null;
   let editorRectanglePreview: LinesMesh | null = null;
   let selectionVisualFrame: number | null = null;
@@ -433,6 +446,7 @@ export function createTerrainDemo(
   const updateEditorCursor = (point: { x: number; z: number } | null): void => {
     if (!editorEnabled || !point) {
       if (editorCursor) editorCursor.isVisible = false;
+      if (editorBrushRing) editorBrushRing.isVisible = false;
       return;
     }
     const points = Array.from({ length: cursorPointCount }, (_, index) => {
@@ -452,6 +466,35 @@ export function createTerrainDemo(
     editorCursor.alpha = 0.95;
     editorCursor.isPickable = false;
     editorCursor.isVisible = true;
+    if (!editorBrushRing) {
+      editorBrushRing = MeshBuilder.CreateTorus("editor-brush-ring", {
+        diameter: 2,
+        thickness: 0.055,
+        tessellation: 64
+      }, scene);
+      const material = new StandardMaterial("editor-brush-ring-material", scene);
+      material.disableLighting = true;
+      material.specularColor = Color3.Black();
+      material.alpha = 0.92;
+      material.disableDepthWrite = true;
+      editorBrushRing.material = material;
+      editorBrushRing.renderingGroupId = 2;
+      editorBrushRing.isPickable = false;
+    }
+    const ringColor = editorSettings.workflow === "select" && editorSettings.selectionMode === "subtract"
+      ? new Color3(1, 0.18, 0.12)
+      : new Color3(0.08, 0.82, 1);
+    const ringMaterial = editorBrushRing.material as StandardMaterial;
+    ringMaterial.diffuseColor = ringColor;
+    ringMaterial.emissiveColor = ringColor;
+    editorBrushRing.position.set(
+      point.x,
+      terrainEditSession.sampleHeight(point) + 1.4,
+      point.z
+    );
+    editorBrushRing.scaling.setAll(editorSettings.brush.radius);
+    editorBrushRing.scaling.y = Math.max(1, editorSettings.brush.radius * 0.025);
+    editorBrushRing.isVisible = true;
     renderController.markSceneMutated();
   };
 
@@ -459,7 +502,7 @@ export function createTerrainDemo(
     selectionVisualFrame = null;
     editorSelectionMesh?.dispose(false, true);
     editorSelectionMesh = null;
-    if (!editorEnabled) return;
+    if (!editorEnabled || editorSettings.workflow !== "select") return;
     const selection = terrainEditSession.getSelection();
     const resolution = terrain.packedSnapshot.analysisResolution;
     const step = terrain.packedSnapshot.analysisStep;
@@ -595,7 +638,43 @@ export function createTerrainDemo(
     const pointerX = event.clientX - bounds.left;
     const pointerY = event.clientY - bounds.top;
     const pick = scene.pick(pointerX, pointerY, (mesh) => isTerrainChunkMesh(mesh.name));
-    return pick?.hit && pick.pickedPoint ? { x: pick.pickedPoint.x, z: pick.pickedPoint.z } : null;
+    if (pick?.hit && pick.pickedPoint) {
+      return { x: pick.pickedPoint.x, z: pick.pickedPoint.z };
+    }
+
+    const ray = scene.createPickingRay(pointerX, pointerY, Matrix.Identity(), camera, false);
+    const maxDistance = Math.max(camera.upperRadiusLimit ?? 2000, terrain.config.worldSize * 2);
+    const step = Math.max(terrain.packedSnapshot.analysisStep, maxDistance / 320);
+    let previousDistance = 0;
+    let previousDelta: number | null = null;
+    const worldMax = terrain.config.worldMin + terrain.config.worldSize;
+    for (let distance = 0; distance <= maxDistance; distance += step) {
+      const position = ray.origin.add(ray.direction.scale(distance));
+      const inside = position.x >= terrain.config.worldMin && position.x <= worldMax &&
+        position.z >= terrain.config.worldMin && position.z <= worldMax;
+      if (!inside) {
+        previousDelta = null;
+        previousDistance = distance;
+        continue;
+      }
+      const delta = position.y - terrainEditSession.sampleHeight({ x: position.x, z: position.z });
+      if (previousDelta !== null && previousDelta >= 0 && delta <= 0) {
+        let low = previousDistance;
+        let high = distance;
+        for (let iteration = 0; iteration < 10; iteration += 1) {
+          const middle = (low + high) * 0.5;
+          const sample = ray.origin.add(ray.direction.scale(middle));
+          const sampleDelta = sample.y - terrainEditSession.sampleHeight({ x: sample.x, z: sample.z });
+          if (sampleDelta > 0) low = middle;
+          else high = middle;
+        }
+        const hit = ray.origin.add(ray.direction.scale((low + high) * 0.5));
+        return { x: hit.x, z: hit.z };
+      }
+      previousDelta = delta;
+      previousDistance = distance;
+    }
+    return null;
   };
 
   canvas.addEventListener("contextmenu", (event) => {
@@ -608,12 +687,33 @@ export function createTerrainDemo(
     });
   };
 
-  const applyEditedHeightsToMeshes = (): void => {
+  const applyEditedHeightsToMeshes = (bounds?: TerrainEditorBounds): void => {
+    const affectedChunks = new Set<string>();
+    if (bounds) {
+      const toChunk = (value: number): number => Math.max(0, Math.min(
+        terrain.config.chunksPerAxis - 1,
+        Math.floor((value - terrain.config.worldMin) / terrain.config.chunkSize)
+      ));
+      const minChunkX = toChunk(bounds.minX);
+      const maxChunkX = toChunk(bounds.maxX);
+      const minChunkZ = toChunk(bounds.minZ);
+      const maxChunkZ = toChunk(bounds.maxZ);
+      for (let chunkZ = minChunkZ - 1; chunkZ <= maxChunkZ + 1; chunkZ += 1) {
+        for (let chunkX = minChunkX - 1; chunkX <= maxChunkX + 1; chunkX += 1) {
+          if (chunkX >= 0 && chunkZ >= 0 && chunkX < terrain.config.chunksPerAxis && chunkZ < terrain.config.chunksPerAxis) {
+            affectedChunks.add(`${chunkX}:${chunkZ}`);
+          }
+        }
+      }
+    }
     scene.meshes.forEach((mesh) => {
       if (!isTerrainChunkMesh(mesh.name)) return;
+      if (bounds) {
+        const match = mesh.name.match(/^terrain-(\d+)-(\d+)-lod\d+$/);
+        if (!match || !affectedChunks.has(`${match[1]}:${match[2]}`)) return;
+      }
       const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
-      const indices = mesh.getIndices();
-      if (!positions || !indices) return;
+      if (!positions) return;
       const lodMatch = mesh.name.match(/-lod(\d+)$/);
       const lod = Number(lodMatch?.[1] ?? 0);
       const resolution = terrain.config.lodResolutions[lod] ?? terrain.config.lodResolutions[0];
@@ -625,8 +725,55 @@ export function createTerrainDemo(
           ? surfaceHeight
           : surfaceHeight - terrain.config.skirtDepth;
       }
-      const normals = new Array<number>(positions.length).fill(0);
-      VertexData.ComputeNormals(positions, indices, normals);
+      const normals = mesh.getVerticesData(VertexBuffer.NormalKind) ?? new Array<number>(positions.length).fill(0);
+      const normalSampleStep = terrain.config.chunkSize / (terrain.config.lodResolutions[0] - 1);
+      const writeSurfaceNormal = (vertex: number): void => {
+        const offset = vertex * 3;
+        const x = positions[offset];
+        const z = positions[offset + 2];
+        const gradientX = (
+          terrainEditSession.sampleHeight({ x: x + normalSampleStep, z }) -
+          terrainEditSession.sampleHeight({ x: x - normalSampleStep, z })
+        ) / (normalSampleStep * 2);
+        const gradientZ = (
+          terrainEditSession.sampleHeight({ x, z: z + normalSampleStep }) -
+          terrainEditSession.sampleHeight({ x, z: z - normalSampleStep })
+        ) / (normalSampleStep * 2);
+        const length = Math.hypot(gradientX, 1, gradientZ);
+        normals[offset] = -gradientX / length;
+        normals[offset + 1] = 1 / length;
+        normals[offset + 2] = -gradientZ / length;
+      };
+      for (let vertex = 0; vertex < surfaceVertexCount; vertex += 1) {
+        writeSurfaceNormal(vertex);
+      }
+
+      const writeSkirtNormal = (
+        skirtVertex: number,
+        topVertex: number,
+        outwardX: number,
+        outwardZ: number
+      ): void => {
+        const skirtOffset = skirtVertex * 3;
+        const topOffset = topVertex * 3;
+        const nx = normals[topOffset] * 0.35 + outwardX * 0.65;
+        const ny = normals[topOffset + 1] * 0.35 - 0.35 * 0.65;
+        const nz = normals[topOffset + 2] * 0.35 + outwardZ * 0.65;
+        const length = Math.hypot(nx, ny, nz);
+        normals[skirtOffset] = nx / length;
+        normals[skirtOffset + 1] = ny / length;
+        normals[skirtOffset + 2] = nz / length;
+      };
+      const northStart = surfaceVertexCount;
+      const southStart = northStart + resolution;
+      const westStart = southStart + resolution;
+      const eastStart = westStart + resolution;
+      for (let sample = 0; sample < resolution; sample += 1) {
+        writeSkirtNormal(northStart + sample, sample, 0, -1);
+        writeSkirtNormal(southStart + sample, (resolution - 1) * resolution + sample, 0, 1);
+        writeSkirtNormal(westStart + sample, sample * resolution, -1, 0);
+        writeSkirtNormal(eastStart + sample, sample * resolution + resolution - 1, 1, 0);
+      }
       mesh.updateVerticesData(VertexBuffer.PositionKind, positions, true, false);
       mesh.updateVerticesData(VertexBuffer.NormalKind, normals, true, false);
       mesh.refreshBoundingInfo(false, false);
@@ -634,9 +781,23 @@ export function createTerrainDemo(
     renderController.markSceneMutated();
   };
 
+  const boundsAroundStroke = (
+    start: { x: number; z: number },
+    end: { x: number; z: number },
+    radius: number
+  ): TerrainEditorBounds => ({
+    minX: Math.min(start.x, end.x) - radius,
+    maxX: Math.max(start.x, end.x) + radius,
+    minZ: Math.min(start.z, end.z) - radius,
+    maxZ: Math.max(start.z, end.z) + radius
+  });
+
   const finishEditorAction = (): void => {
-    applyEditedHeightsToMeshes();
-    scheduleEditedTerrainRefresh();
+    editorDerivedDirty = true;
+    editorInputLocked = true;
+    window.requestAnimationFrame(() => {
+      editorInputLocked = false;
+    });
   };
 
   canvas.addEventListener("pointerdown", (event) => {
@@ -653,6 +814,11 @@ export function createTerrainDemo(
       return;
     }
     if (event.button !== 0) return;
+    if (editorInputLocked) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     const point = pickTerrainPoint(event);
     if (!point) return;
     event.preventDefault();
@@ -662,7 +828,8 @@ export function createTerrainDemo(
     updateEditorCursor(point);
     if (editorSettings.workflow === "sculpt") {
       terrainEditSession.beginStroke(editorSettings.tool, point, editorSettings.brush);
-      applyEditedHeightsToMeshes();
+      editorLastEditPoint = point;
+      applyEditedHeightsToMeshes(boundsAroundStroke(point, point, editorSettings.brush.radius));
     } else if (editorSettings.selectionShape === "rectangle") {
       editorRectangleStart = point;
     } else {
@@ -703,7 +870,12 @@ export function createTerrainDemo(
     event.stopImmediatePropagation();
     if (editorSettings.workflow === "sculpt") {
       terrainEditSession.appendStroke(point);
-      applyEditedHeightsToMeshes();
+      applyEditedHeightsToMeshes(boundsAroundStroke(
+        editorLastEditPoint ?? point,
+        point,
+        editorSettings.brush.radius
+      ));
+      editorLastEditPoint = point;
     } else if (editorSettings.selectionShape === "brush") {
       terrainEditSession.paintSelection(point, editorSettings.brush.radius, editorSettings.brush.hardness, editorSettings.selectionMode);
     }
@@ -729,6 +901,7 @@ export function createTerrainDemo(
       terrainEditSession.selectRectangle(editorRectangleStart, point, editorSettings.selectionMode);
     }
     editorRectangleStart = null;
+    editorLastEditPoint = null;
     updateRectanglePreview(null);
     editorPointerActive = false;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -744,6 +917,7 @@ export function createTerrainDemo(
       applyEditedHeightsToMeshes();
     }
     editorRectangleStart = null;
+    editorLastEditPoint = null;
     updateRectanglePreview(null);
     editorPointerActive = false;
   }, true);
@@ -824,6 +998,7 @@ export function createTerrainDemo(
       terrain = nextTerrain;
       terrainEditSession.replaceTerrain(nextTerrain);
       lastDerivedEditorRevision = terrainEditSession.getState().revision;
+      editorDerivedDirty = false;
       terrainAdapter = createTerrainAdapter(
         terrain,
         nextTextureOptions,
@@ -917,6 +1092,7 @@ export function createTerrainDemo(
       else {
         terrainEditSession.replaceTerrain(nextTerrain);
         lastDerivedEditorRevision = terrainEditSession.getState().revision;
+        editorDerivedDirty = false;
       }
       terrainAdapter = createTerrainAdapter(
         terrain,
@@ -972,26 +1148,12 @@ export function createTerrainDemo(
     if (revision !== terrainEditSession.getState().revision || refreshVersion !== buildVersion) return;
     await importTerrainAsset(refreshed, true);
     lastDerivedEditorRevision = revision;
+    editorDerivedDirty = false;
   };
-
-  function scheduleEditedTerrainRefresh(): void {
-    if (editorRefreshTimeout !== null) window.clearTimeout(editorRefreshTimeout);
-    editorRefreshTimeout = window.setTimeout(() => {
-      editorRefreshTimeout = null;
-      editorRefreshPromise = refreshEditedTerrain().catch((error) => {
-        console.error(error);
-        setBuildStatus({ phase: "error", message: error instanceof Error ? error.message : String(error), completed: 0, total: 0 });
-      });
-    }, 250);
-  }
 
   const flushTerrainEdits = async (): Promise<void> => {
     applyEditedHeightsToMeshes();
-    if (editorRefreshTimeout !== null) {
-      window.clearTimeout(editorRefreshTimeout);
-      editorRefreshTimeout = null;
-      editorRefreshPromise = refreshEditedTerrain();
-    } else if (terrainEditSession.getState().revision !== lastDerivedEditorRevision) {
+    if (terrainEditSession.getState().revision !== lastDerivedEditorRevision) {
       editorRefreshPromise = refreshEditedTerrain();
     }
     await editorRefreshPromise;
@@ -1017,6 +1179,7 @@ export function createTerrainDemo(
         terrainEditSession.cancelStroke();
         editorPointerActive = false;
         editorRectangleStart = null;
+        editorLastEditPoint = null;
         updateRectanglePreview(null);
         applyEditedHeightsToMeshes();
       }
@@ -1033,7 +1196,17 @@ export function createTerrainDemo(
       renderController.markSceneMutated();
     },
     getEditorEnabled: () => editorEnabled,
-    setEditorSettings: (settings: TerrainEditorSettings) => { editorSettings = settings; },
+    applyTerrainEditChanges: () => {
+      applyEditedHeightsToMeshes();
+      editorDerivedDirty = true;
+      renderController.markSceneMutated();
+    },
+    getEditorDerivedDirty: () => editorDerivedDirty,
+    setEditorSettings: (settings: TerrainEditorSettings) => {
+      editorSettings = settings;
+      updateSelectionVisual();
+      renderController.markSceneMutated();
+    },
     getEditorSettings: () => editorSettings,
     flushTerrainEdits,
     importTerrainAsset: (nextTerrain) => importTerrainAsset(nextTerrain, false),

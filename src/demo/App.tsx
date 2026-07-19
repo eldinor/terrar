@@ -12,6 +12,8 @@ import type {
 import { useDemoBridge } from "./useDemoBridge";
 import "./app.css";
 
+declare const __PACKAGE_VERSION__: string;
+
 interface TerrainPresetOption {
   readonly name: string;
 }
@@ -191,7 +193,7 @@ export function App() {
                   onClick={() => bridge?.setEditorEnabled(!editorState.enabled)}
                   type="button"
                 >
-                  Editor Mode {editorState.enabled ? "On" : "Off"} (E)
+                  Editor Mode {editorState.enabled ? "On" : "Off"} (E) · v{__PACKAGE_VERSION__} alpha
                 </button>
               ) : null}
             </>,
@@ -331,6 +333,17 @@ function EditorPanel({ bridge, state }: { readonly bridge: ReturnType<typeof use
         </>
       ) : null}
       <div className="editor-divider" />
+      <button
+        className={cx("editor-button", state.derivedDirty && "is-active")}
+        disabled={!state.derivedDirty}
+        onClick={() => void bridge?.refreshEditorFeatures()}
+        type="button"
+      >
+        {state.derivedDirty ? "Refresh Features" : "Features Up to Date"}
+      </button>
+      {state.derivedDirty ? (
+        <div className="editor-status">Terrain chunks are updated. Rivers, roads, water, POIs, and foliage are waiting for refresh.</div>
+      ) : null}
       <div className="editor-row-grid">
         <button className="editor-button" disabled={!state.canUndo} onClick={() => bridge?.undoTerrainEdit()} type="button">Undo</button>
         <button className="editor-button" disabled={!state.canRedo} onClick={() => bridge?.redoTerrainEdit()} type="button">Redo</button>

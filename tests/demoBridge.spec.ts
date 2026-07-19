@@ -234,6 +234,8 @@ function createTerrainDemoStub(): DemoStub {
     setEditorSettings: vi.fn((settings) => { editorSettings = settings; }),
     getEditorSettings: () => editorSettings,
     flushTerrainEdits: vi.fn(async () => {}),
+    applyTerrainEditChanges: vi.fn(),
+    getEditorDerivedDirty: () => false,
     importTerrainAsset: vi.fn(async () => {}),
     beginRendering: vi.fn(),
     stopRendering: vi.fn(),

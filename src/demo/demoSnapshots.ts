@@ -26,6 +26,7 @@ export interface EditorPanelState {
   readonly canRedo: boolean;
   readonly hasSelection: boolean;
   readonly selectedSampleCount: number;
+  readonly derivedDirty: boolean;
 }
 
 export interface FeaturePanelState {

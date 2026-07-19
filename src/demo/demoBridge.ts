@@ -95,6 +95,7 @@ export interface DemoBridge {
   selectAllEditorTerrain(): void;
   undoTerrainEdit(): void;
   redoTerrainEdit(): void;
+  refreshEditorFeatures(): Promise<void>;
 }
 
 /**
@@ -134,11 +135,19 @@ let transientHudTimeoutId: number | null = null;
 let performanceText = "";
 const snapshotListeners = new Set<() => void>();
 let currentSnapshot: DemoSnapshot | null = null;
+let terrainEditSnapshotScheduled = false;
+let terrainEditSubscriptionVersion = 0;
+let unsubscribeTerrainEditSession: (() => void) | null = null;
 
 /**
  * Wires the demo runtime to the DOM mounts used by the React UI.
  */
 export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
+  unsubscribeTerrainEditSession?.();
+  unsubscribeTerrainEditSession = null;
+  terrainEditSnapshotScheduled = false;
+  terrainEditSubscriptionVersion += 1;
+
   context = nextContext;
   buildStatus = nextContext.demo.getBuildStatus();
   draftConfig = buildDraftConfig();
@@ -185,7 +194,9 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
     renderMaterialTabState();
     renderWorldTabState();
   });
-  nextContext.demo.getTerrainEditSession().subscribe(() => publishSnapshot());
+  unsubscribeTerrainEditSession = nextContext.demo
+    .getTerrainEditSession()
+    .subscribe(scheduleTerrainEditSnapshot);
 
   window.addEventListener("keydown", async (event) => {
     if (event.repeat || isEditableKeyboardTarget(event.target)) {
@@ -281,7 +292,8 @@ export function getEditorPanelState(): EditorPanelState {
     canUndo: sessionState.canUndo,
     canRedo: sessionState.canRedo,
     hasSelection: sessionState.hasSelection,
-    selectedSampleCount: sessionState.selectedSampleCount
+    selectedSampleCount: sessionState.selectedSampleCount,
+    derivedDirty: demo.getEditorDerivedDirty()
   };
 }
 
@@ -299,8 +311,7 @@ export function applyEditorSelection(): void {
   const demo = requireContext().demo;
   const settings = demo.getEditorSettings();
   if (demo.getTerrainEditSession().applyToSelection(settings.tool, settings.brush.strength)) {
-    demo.markSceneMutated();
-    void demo.flushTerrainEdits();
+    demo.applyTerrainEditChanges();
   }
   publishSnapshot();
 }
@@ -317,13 +328,18 @@ export function selectAllEditorTerrain(): void {
 
 export function undoTerrainEdit(): void {
   const demo = requireContext().demo;
-  if (demo.getTerrainEditSession().undo()) void demo.flushTerrainEdits();
+  if (demo.getTerrainEditSession().undo()) demo.applyTerrainEditChanges();
   publishSnapshot();
 }
 
 export function redoTerrainEdit(): void {
   const demo = requireContext().demo;
-  if (demo.getTerrainEditSession().redo()) void demo.flushTerrainEdits();
+  if (demo.getTerrainEditSession().redo()) demo.applyTerrainEditChanges();
+  publishSnapshot();
+}
+
+export async function refreshEditorFeatures(): Promise<void> {
+  await requireContext().demo.flushTerrainEdits();
   publishSnapshot();
 }
 
@@ -903,6 +919,29 @@ function requireDraftConfig(): DraftConfig {
 function publishSnapshot(): void {
   currentSnapshot = createSnapshot();
   snapshotListeners.forEach((listener) => listener());
+}
+
+function scheduleTerrainEditSnapshot(): void {
+  if (terrainEditSnapshotScheduled) {
+    return;
+  }
+
+  terrainEditSnapshotScheduled = true;
+  const subscriptionVersion = terrainEditSubscriptionVersion;
+  const publish = (): void => {
+    if (subscriptionVersion !== terrainEditSubscriptionVersion) {
+      return;
+    }
+
+    terrainEditSnapshotScheduled = false;
+    publishSnapshot();
+  };
+
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(publish);
+  } else {
+    queueMicrotask(publish);
+  }
 }
 
 function setTransientHudMessage(message: string, durationMs = 3000): void {

@@ -74,6 +74,7 @@ export class TerrainMaterialFactory {
         "blendSharpness",
         "triplanarSharpness",
         "normalStrength",
+        "texturesEnabled",
         "debugMode",
         "heightDebugMax"
       ],
@@ -107,6 +108,7 @@ export class TerrainMaterialFactory {
     material.setVector2("roadMaskWorldMin", new Vector2(-512, -512));
     material.setVector2("roadMaskWorldSize", new Vector2(1024, 1024));
     material.setFloat("roadTintStrength", 0.95);
+    material.setInt("texturesEnabled", 1);
     material.setTexture("roadMask", createBlackMaskTexture(scene));
 
     this.applyConfig(material, config);
@@ -171,6 +173,13 @@ export class TerrainMaterialFactory {
     debugMode: TerrainDebugViewMode
   ): void {
     material.setInt("debugMode", debugMode);
+  }
+
+  static setTexturesEnabled(
+    material: ShaderMaterial,
+    enabled: boolean
+  ): void {
+    material.setInt("texturesEnabled", enabled ? 1 : 0);
   }
 
   static setWaterLevel(material: ShaderMaterial, waterLevel: number): void {
@@ -425,6 +434,7 @@ function ensureTerrainBlendShadersRegistered(): void {
     uniform float triplanarSharpness;
     uniform float normalStrength;
     uniform float heightDebugMax;
+    uniform int texturesEnabled;
     uniform int debugMode;
 
     float saturate(float value) {
@@ -500,6 +510,15 @@ function ensureTerrainBlendShadersRegistered(): void {
 
     void main(void) {
       vec3 normalW = normalize(vWorldNormal);
+      if (texturesEnabled == 0) {
+        float diffuse = max(dot(normalW, normalize(lightDirection)), 0.0);
+        float wrappedDiffuse = diffuse * 0.75 + 0.25;
+        vec3 solidColor = vec3(0.62, 0.65, 0.69);
+        solidColor *= ambientColor + lightColor * wrappedDiffuse * normalStrength;
+        gl_FragColor = vec4(solidColor, 1.0);
+        return;
+      }
+
       float slope = 1.0 - saturate(normalW.y);
       float materialSlope = pow(slope, 1.35);
       float height = vWorldPos.y;

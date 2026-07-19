@@ -20,6 +20,7 @@ export class TerrainSurfaceRuntime {
   private material: ShaderMaterial | null = null;
   private materialConfig: TerrainMaterialConfig | null = null;
   private debugViewMode = TerrainDebugViewMode.Final;
+  private texturesEnabled = true;
 
   constructor(
     private readonly scene: Scene,
@@ -72,6 +73,7 @@ export class TerrainSurfaceRuntime {
     this.material = null;
     this.materialConfig = null;
     this.debugViewMode = TerrainDebugViewMode.Final;
+    this.texturesEnabled = true;
   }
 
   getMaterial(): ShaderMaterial {
@@ -90,6 +92,15 @@ export class TerrainSurfaceRuntime {
 
   getWireframe(): boolean {
     return this.material?.wireframe ?? false;
+  }
+
+  setTexturesEnabled(enabled: boolean): void {
+    TerrainMaterialFactory.setTexturesEnabled(this.getMaterial(), enabled);
+    this.texturesEnabled = enabled;
+  }
+
+  getTexturesEnabled(): boolean {
+    return this.texturesEnabled;
   }
 
   setWaterLevel(level: number): void {

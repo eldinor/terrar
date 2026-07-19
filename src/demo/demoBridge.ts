@@ -114,6 +114,7 @@ export interface DemoSnapshot {
 let context: DemoBridgeContext | null = null;
 let buildStatus = { phase: "idle", message: "", completed: 0, total: 0 } as ReturnType<TerrainDemo["getBuildStatus"]>;
 let wireframe = false;
+let texturesEnabled = true;
 let debugVisible = false;
 let loadingDebug = false;
 let draftConfig: DraftConfig | null = null;
@@ -135,6 +136,7 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   presetOptions = getPresetOptions(draftConfig.poiDebug);
   activeTab = "runtime";
   wireframe = false;
+  texturesEnabled = nextContext.demo.getTexturesEnabled();
   debugVisible = false;
   loadingDebug = false;
   transientHudMessage = "";
@@ -176,7 +178,7 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
   });
 
   window.addEventListener("keydown", async (event) => {
-    if (event.repeat) {
+    if (event.repeat || isEditableKeyboardTarget(event.target)) {
       return;
     }
 
@@ -197,6 +199,12 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
     if (event.key.toLowerCase() === "v") {
       wireframe = !wireframe;
       current.demo.setWireframe(wireframe);
+      renderHud();
+    }
+
+    if (event.key.toLowerCase() === "t") {
+      texturesEnabled = !texturesEnabled;
+      current.demo.setTexturesEnabled(texturesEnabled);
       renderHud();
     }
   });
@@ -236,9 +244,19 @@ export function getHudText(): string {
     poi: current.demo.getPoiStats(),
     roads: current.demo.getRoadStats(),
     statusMessage: transientHudMessage,
+    texturesEnabled,
     wireframe,
     workerStatus: current.demo.getWorkerStatus(),
   });
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  if (!element || typeof element.tagName !== "string") {
+    return false;
+  }
+
+  return element.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName);
 }
 
 export function getHudStatusText(): string {

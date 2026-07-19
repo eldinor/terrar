@@ -216,6 +216,8 @@ function createTerrainDemoStub(): DemoStub {
     suspendRendering: vi.fn(() => noopSuspendToken),
     markSceneMutated: vi.fn(),
     setWireframe: vi.fn(),
+    setTexturesEnabled: vi.fn(),
+    getTexturesEnabled: () => true,
     toggleDebugOverlay: vi.fn(async () => true),
     setWaterLevel: vi.fn((level: number) => {
       waterLevel = level;
@@ -396,6 +398,26 @@ describe("demo bridge", () => {
     expect(notifications).toBeGreaterThan(0);
 
     unsubscribe();
+  });
+
+  it("toggles the untextured terrain view with T and reports it in the footer", async () => {
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+
+    const keydownListener = vi.mocked(window.addEventListener).mock.calls.find(
+      ([eventName]) => eventName === "keydown",
+    )?.[1] as EventListener;
+    await keydownListener({ key: "t", repeat: false, target: null } as unknown as KeyboardEvent);
+
+    expect(demo.setTexturesEnabled).toHaveBeenCalledWith(false);
+    expect(bridgeModule.getSnapshot().hudText).toContain("T textures: off");
   });
 
   it("updates feature state through the bridge without leaking Babylon state into React", async () => {

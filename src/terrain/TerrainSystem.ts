@@ -268,6 +268,14 @@ export class TerrainSystem {
     return this.surfaceRuntime.getWireframe();
   }
 
+  setTexturesEnabled(enabled: boolean): void {
+    this.surfaceRuntime.setTexturesEnabled(enabled);
+  }
+
+  getTexturesEnabled(): boolean {
+    return this.surfaceRuntime.getTexturesEnabled();
+  }
+
   getFoliageCandidatesForChunk(
     chunkX: number,
     chunkZ: number

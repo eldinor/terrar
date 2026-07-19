@@ -48,6 +48,8 @@ export interface TerrainDemo {
   readonly suspendRendering: () => RenderSuspendToken;
   readonly markSceneMutated: () => void;
   readonly setWireframe: (enabled: boolean) => void;
+  readonly setTexturesEnabled: (enabled: boolean) => void;
+  readonly getTexturesEnabled: () => boolean;
   readonly toggleDebugOverlay: () => Promise<boolean>;
   readonly setWaterLevel: (level: number) => void;
   readonly getWaterLevel: () => number;
@@ -423,6 +425,7 @@ export function createTerrainDemo(
     const rebuildStartedAt = performance.now();
     try {
       const wireframe = terrainAdapter.getWireframe();
+      const texturesEnabled = terrainAdapter.getTexturesEnabled();
       const debugViewMode = terrainAdapter.getDebugViewMode();
       const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
       const waterLevel = terrainAdapter.getWaterLevel();
@@ -496,6 +499,7 @@ export function createTerrainDemo(
       terrainAdapter.initialize();
       trackAdapterActivity(terrainAdapter, nextBuildVersion);
       terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setTexturesEnabled(texturesEnabled);
       terrainAdapter.setCollisionRadius(
         nextConfigOverrides.collisionRadius ?? collisionRadius
       );
@@ -548,6 +552,7 @@ export function createTerrainDemo(
     const renderSuspendToken = renderController.suspendRendering();
     try {
       const wireframe = terrainAdapter.getWireframe();
+      const texturesEnabled = terrainAdapter.getTexturesEnabled();
       const debugViewMode = terrainAdapter.getDebugViewMode();
       const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
       const waterLevel = terrainAdapter.getWaterLevel();
@@ -583,6 +588,7 @@ export function createTerrainDemo(
       terrainAdapter.initialize();
       trackAdapterActivity(terrainAdapter, nextBuildVersion);
       terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setTexturesEnabled(texturesEnabled);
       terrainAdapter.setCollisionRadius(collisionRadius);
       terrainAdapter.setFoliageRadius(foliageRadius);
       terrainAdapter.setShowFoliage(showFoliage);
@@ -638,6 +644,8 @@ export function createTerrainDemo(
     suspendRendering: () => renderController.suspendRendering(),
     markSceneMutated: () => renderController.markSceneMutated(),
     setWireframe: mutateScene((enabled: boolean) => terrainAdapter.setWireframe(enabled)),
+    setTexturesEnabled: mutateScene((enabled: boolean) => terrainAdapter.setTexturesEnabled(enabled)),
+    getTexturesEnabled: () => terrainAdapter.getTexturesEnabled(),
     toggleDebugOverlay: async () => {
       renderActivityState.togglingDebugOverlay = true;
       renderController.markSceneMutated();

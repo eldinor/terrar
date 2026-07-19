@@ -89,6 +89,14 @@ class BabylonTerrainSystemAdapter implements BabylonTerrainAdapter {
     return this.terrainSystem.getWireframe();
   }
 
+  setTexturesEnabled(enabled: boolean): void {
+    this.terrainSystem.setTexturesEnabled(enabled);
+  }
+
+  getTexturesEnabled(): boolean {
+    return this.terrainSystem.getTexturesEnabled();
+  }
+
   setWaterLevel(level: number): void {
     this.terrainSystem.setWaterLevel(level);
   }

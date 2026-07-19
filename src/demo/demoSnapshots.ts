@@ -78,6 +78,7 @@ export function buildHudText(args: {
   readonly poi: TerrainPoiStats;
   readonly roads: TerrainRoadStats;
   readonly statusMessage?: string;
+  readonly texturesEnabled: boolean;
   readonly wireframe: boolean;
   readonly workerStatus: TerrainWorkerStatus;
 }): string {
@@ -91,6 +92,7 @@ export function buildHudText(args: {
   const statusText = args.statusMessage ? ` | ${args.statusMessage}` : "";
   return (
     `G debug: ${debugState} | V wireframe: ${args.wireframe ? "on" : "off"} | ` +
+    `T textures: ${args.texturesEnabled ? "on" : "off"} | ` +
     `foliage: ${args.foliage.visibleInstances}/${args.foliage.totalInstances} ` +
     `(T ${args.foliage.visibleTrees}/${args.foliage.totalTrees}, ` +
     `B ${args.foliage.visibleBushes}/${args.foliage.totalBushes}, ` +

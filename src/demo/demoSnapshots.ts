@@ -17,6 +17,16 @@ import type {
 import type { TerrainBuildProfile, TerrainBuildStatus, TerrainWorkerStatus } from "./createTerrainDemo";
 import type { DraftConfig } from "./demoState";
 import type { TerrainFoliageStats } from "../terrain/TerrainFoliageSystem";
+import type { TerrainEditorSettings } from "./createTerrainDemo";
+
+export interface EditorPanelState {
+  readonly enabled: boolean;
+  readonly settings: TerrainEditorSettings;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly hasSelection: boolean;
+  readonly selectedSampleCount: number;
+}
 
 export interface FeaturePanelState {
   readonly features: TerrainFeatureConfig;

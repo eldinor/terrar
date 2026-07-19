@@ -42,6 +42,7 @@ import {
   buildRuntimeTabState,
   buildWorldTabState,
   type FeaturePanelState,
+  type EditorPanelState,
   type MaterialTabState,
   type RuntimeTabState,
   type WorldTabState,
@@ -72,8 +73,8 @@ export interface DemoBridge {
   getWorldTabState(): WorldTabState;
   subscribe(listener: () => void): () => void;
   applyPresetByIndex(index: number): Promise<void>;
-  exportTerrainBundle(): void;
-  exportTerrainHeightmap(): void;
+  exportTerrainBundle(): Promise<void>;
+  exportTerrainHeightmap(): Promise<void>;
   importTerrainAssetText(serialized: string): Promise<void>;
   saveCurrentPreset(name: string): void;
   exportPresetByIndex(index: number): void;
@@ -87,6 +88,13 @@ export interface DemoBridge {
   setRuntimeTabState(state: RuntimeTabState): void;
   setForceLod0(enabled: boolean): void;
   setWorldTabState(state: WorldTabState): void;
+  setEditorEnabled(enabled: boolean): void;
+  setEditorSettings(settings: EditorPanelState["settings"]): void;
+  applyEditorSelection(): void;
+  clearEditorSelection(): void;
+  selectAllEditorTerrain(): void;
+  undoTerrainEdit(): void;
+  redoTerrainEdit(): void;
 }
 
 /**
@@ -96,6 +104,7 @@ export interface DemoSnapshot {
   readonly activePanelTab: PanelTab;
   readonly featurePanelMount: HTMLElement | null;
   readonly featurePanelState: FeaturePanelState | null;
+  readonly editorPanelState: EditorPanelState | null;
   readonly featureStatusText: string;
   readonly footerMount: HTMLElement | null;
   readonly footerPerformanceMount: HTMLElement | null;
@@ -176,6 +185,7 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
     renderMaterialTabState();
     renderWorldTabState();
   });
+  nextContext.demo.getTerrainEditSession().subscribe(() => publishSnapshot());
 
   window.addEventListener("keydown", async (event) => {
     if (event.repeat || isEditableKeyboardTarget(event.target)) {
@@ -183,6 +193,18 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
     }
 
     const current = requireContext();
+
+    if (event.key.toLowerCase() === "e") {
+      setEditorEnabled(!current.demo.getEditorEnabled());
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && ["y", "z"].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      if (event.shiftKey || event.key.toLowerCase() === "y") redoTerrainEdit();
+      else undoTerrainEdit();
+      return;
+    }
 
     if (event.key.toLowerCase() === "g") {
       if (loadingDebug) {
@@ -248,6 +270,61 @@ export function getHudText(): string {
     wireframe,
     workerStatus: current.demo.getWorkerStatus(),
   });
+}
+
+export function getEditorPanelState(): EditorPanelState {
+  const demo = requireContext().demo;
+  const sessionState = demo.getTerrainEditSession().getState();
+  return {
+    enabled: demo.getEditorEnabled(),
+    settings: demo.getEditorSettings(),
+    canUndo: sessionState.canUndo,
+    canRedo: sessionState.canRedo,
+    hasSelection: sessionState.hasSelection,
+    selectedSampleCount: sessionState.selectedSampleCount
+  };
+}
+
+export function setEditorEnabled(enabled: boolean): void {
+  requireContext().demo.setEditorEnabled(enabled);
+  publishSnapshot();
+}
+
+export function setEditorSettings(settings: EditorPanelState["settings"]): void {
+  requireContext().demo.setEditorSettings(settings);
+  publishSnapshot();
+}
+
+export function applyEditorSelection(): void {
+  const demo = requireContext().demo;
+  const settings = demo.getEditorSettings();
+  if (demo.getTerrainEditSession().applyToSelection(settings.tool, settings.brush.strength)) {
+    demo.markSceneMutated();
+    void demo.flushTerrainEdits();
+  }
+  publishSnapshot();
+}
+
+export function clearEditorSelection(): void {
+  requireContext().demo.getTerrainEditSession().clearSelection();
+  publishSnapshot();
+}
+
+export function selectAllEditorTerrain(): void {
+  requireContext().demo.getTerrainEditSession().selectAll();
+  publishSnapshot();
+}
+
+export function undoTerrainEdit(): void {
+  const demo = requireContext().demo;
+  if (demo.getTerrainEditSession().undo()) void demo.flushTerrainEdits();
+  publishSnapshot();
+}
+
+export function redoTerrainEdit(): void {
+  const demo = requireContext().demo;
+  if (demo.getTerrainEditSession().redo()) void demo.flushTerrainEdits();
+  publishSnapshot();
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -511,9 +588,10 @@ export function getPerformanceText(): string {
 /**
  * Exports the current terrain as a browser-downloaded ZIP bundle.
  */
-export function exportTerrainBundle(): void {
+export async function exportTerrainBundle(): Promise<void> {
   try {
     const current = requireContext();
+    await current.demo.flushTerrainEdits();
     const terrain = current.demo.getTerrainAsset();
     const bundle = createTerrainExportBundle(terrain);
     const encoded = encodeTerrainExportFiles(bundle);
@@ -535,9 +613,11 @@ export function exportTerrainBundle(): void {
 /**
  * Exports the current terrain heightmap as a grayscale PNG.
  */
-export function exportTerrainHeightmap(): void {
+export async function exportTerrainHeightmap(): Promise<void> {
   try {
-    const terrain = requireContext().demo.getTerrainAsset();
+    const demo = requireContext().demo;
+    await demo.flushTerrainEdits();
+    const terrain = demo.getTerrainAsset();
     const heightmap = createTerrainHeightmap(terrain);
     downloadBinaryFile(
       `${slugifyPresetName(`terrain-${terrain.config.seed}`)}-heightmap.png`,
@@ -602,6 +682,10 @@ export function importPresetText(serialized: string): void {
  * Rebuilds the terrain from the current draft configuration.
  */
 export async function rebuildTerrainFromDraft(): Promise<void> {
+  const demo = requireContext().demo;
+  if (demo.getTerrainEditSession().getState().canUndo && typeof window.confirm === "function") {
+    if (!window.confirm("Rebuilding terrain will replace all sculpt edits. Continue?")) return;
+  }
   await applyDraftToWorld();
 }
 
@@ -841,6 +925,7 @@ function createSnapshot(): DemoSnapshot {
     activePanelTab: getActivePanelTab(),
     featurePanelMount: document.getElementById("react-feature-panel"),
     featurePanelState: getFeaturePanelState(),
+    editorPanelState: getEditorPanelState(),
     featureStatusText: getFeatureBuildStatusText(),
     footerMount: document.getElementById("react-footer-status"),
     footerPerformanceMount: document.getElementById("react-footer-performance"),

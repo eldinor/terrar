@@ -3,9 +3,10 @@ import {
   BuildWorldRequest,
   WorldBuildWorkerResponse
 } from "./TerrainBuildMessages";
-import { buildSerializedWorldData } from "./TerrainWorldBuild";
+import { buildSerializedWorldData, rebuildSerializedWorldDataFromHeight } from "./TerrainWorldBuild";
 import { BuiltTerrain } from "../builder";
 import { builtTerrainFromSerializedData } from "../builder/buildTerrain";
+import { unpackTerrainSnapshot } from "./TerrainSnapshotLayout";
 
 export class TerrainBuildCoordinator {
   private readonly worker: Worker | null;
@@ -59,6 +60,27 @@ export class TerrainBuildCoordinator {
     return new Promise<BuiltTerrain>((resolve, reject) => {
       this.pending.set(buildVersion, { config, resolve, reject });
       this.worker!.postMessage(request);
+    });
+  }
+
+  async rebuildEditedTerrain(terrain: BuiltTerrain, buildVersion: number): Promise<BuiltTerrain> {
+    const config = terrain.config;
+    const snapshot = unpackTerrainSnapshot(terrain.packedSnapshot);
+    if (!this.worker) {
+      return builtTerrainFromSerializedData(
+        config,
+        rebuildSerializedWorldDataFromHeight(config, snapshot, this.preferSharedSnapshot)
+      );
+    }
+    return new Promise<BuiltTerrain>((resolve, reject) => {
+      this.pending.set(buildVersion, { config, resolve, reject });
+      this.worker!.postMessage({
+        type: "rebuildEditedWorld",
+        buildVersion,
+        config,
+        preferSharedSnapshot: this.preferSharedSnapshot,
+        snapshot
+      });
     });
   }
 

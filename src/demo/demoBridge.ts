@@ -287,6 +287,13 @@ export function getHudText(): string {
 export function getEditorPanelState(): EditorPanelState {
   const demo = requireContext().demo;
   const sessionState = demo.getTerrainEditSession().getState();
+  const draft = requireDraftConfig();
+  const liveConfig = demo.getTerrainConfig();
+  const derivedConfigDirty =
+    draft.buildFoliage !== liveConfig.buildFoliage ||
+    hasConfigValueChanges(liveConfig.features, draft.features) ||
+    hasConfigValueChanges(liveConfig.poi, draft.poi) ||
+    hasConfigValueChanges(liveConfig.rivers, draft.rivers);
   return {
     enabled: demo.getEditorEnabled(),
     settings: demo.getEditorSettings(),
@@ -294,7 +301,7 @@ export function getEditorPanelState(): EditorPanelState {
     canRedo: sessionState.canRedo,
     hasSelection: sessionState.hasSelection,
     selectedSampleCount: sessionState.selectedSampleCount,
-    derivedDirty: demo.getEditorDerivedDirty()
+    derivedDirty: demo.getEditorDerivedDirty() || derivedConfigDirty
   };
 }
 
@@ -349,14 +356,27 @@ export async function smoothWorld(
   demo.applyTerrainEditChanges();
   publishSnapshot();
   if (refreshFeatures) {
-    await demo.flushTerrainEdits();
+    await refreshEditedFeaturesFromDraft(demo);
     publishSnapshot();
   }
 }
 
 export async function refreshEditorFeatures(): Promise<void> {
-  await requireContext().demo.flushTerrainEdits();
+  await refreshEditedFeaturesFromDraft(requireContext().demo);
   publishSnapshot();
+}
+
+async function refreshEditedFeaturesFromDraft(demo: TerrainDemo): Promise<void> {
+  const draft = requireDraftConfig();
+  await demo.flushTerrainEdits({
+    buildFoliage: draft.buildFoliage,
+    features: { ...draft.features },
+    poi: { ...draft.poi },
+    rivers: { ...draft.rivers }
+  });
+  demo.setShowPoi(draft.features.poi);
+  demo.setShowRoads(draft.features.poi && draft.features.roads);
+  demo.setShowFoliage(draft.buildFoliage && draft.showFoliage);
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -935,6 +955,11 @@ function requireDraftConfig(): DraftConfig {
 function publishSnapshot(): void {
   currentSnapshot = createSnapshot();
   snapshotListeners.forEach((listener) => listener());
+}
+
+function hasConfigValueChanges(current: object, next: object): boolean {
+  const currentValues = current as Record<string, unknown>;
+  return Object.entries(next).some(([key, value]) => currentValues[key] !== value);
 }
 
 function scheduleTerrainEditSnapshot(): void {

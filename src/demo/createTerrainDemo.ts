@@ -60,6 +60,13 @@ export interface TerrainEditorSettings {
   readonly brush: TerrainBrushSettings;
 }
 
+export interface TerrainDerivedRefreshOptions {
+  readonly features?: BuiltTerrainConfig["features"];
+  readonly poi?: BuiltTerrainConfig["poi"];
+  readonly rivers?: BuiltTerrainConfig["rivers"];
+  readonly buildFoliage?: boolean;
+}
+
 interface TerrainEditorBounds {
   readonly minX: number;
   readonly maxX: number;
@@ -80,7 +87,7 @@ export interface TerrainDemo {
   readonly getEditorEnabled: () => boolean;
   readonly setEditorSettings: (settings: TerrainEditorSettings) => void;
   readonly getEditorSettings: () => TerrainEditorSettings;
-  readonly flushTerrainEdits: () => Promise<void>;
+  readonly flushTerrainEdits: (options?: TerrainDerivedRefreshOptions) => Promise<void>;
   readonly applyTerrainEditChanges: () => void;
   readonly getEditorDerivedDirty: () => boolean;
   readonly importTerrainAsset: (terrain: BuiltTerrain) => Promise<void>;
@@ -1146,21 +1153,49 @@ export function createTerrainDemo(
     }
   };
 
-  const refreshEditedTerrain = async (): Promise<void> => {
+  const refreshEditedTerrain = async (options: TerrainDerivedRefreshOptions = {}): Promise<void> => {
     const revision = terrainEditSession.getState().revision;
     const editedTerrain = terrainEditSession.getTerrain();
+    const refreshTerrain: BuiltTerrain = {
+      ...editedTerrain,
+      config: {
+        ...editedTerrain.config,
+        buildFoliage: options.buildFoliage ?? editedTerrain.config.buildFoliage,
+        features: {
+          ...editedTerrain.config.features,
+          ...options.features
+        },
+        poi: {
+          ...editedTerrain.config.poi,
+          ...options.poi
+        },
+        rivers: {
+          ...editedTerrain.config.rivers,
+          ...options.rivers
+        }
+      }
+    };
     const refreshVersion = ++buildVersion;
     setBuildStatus({ phase: "world", message: "Refreshing edited terrain", completed: 0, total: 1 });
-    const refreshed = await buildCoordinator.rebuildEditedTerrain(editedTerrain, refreshVersion);
+    const refreshed = await buildCoordinator.rebuildEditedTerrain(refreshTerrain, refreshVersion);
     if (revision !== terrainEditSession.getState().revision || refreshVersion !== buildVersion) return;
     await importTerrainAsset(refreshed, true);
     lastDerivedEditorRevision = revision;
   };
 
-  const flushTerrainEdits = async (): Promise<void> => {
+  const flushTerrainEdits = async (options: TerrainDerivedRefreshOptions = {}): Promise<void> => {
     applyEditedHeightsToMeshes();
-    if (terrainEditSession.getState().revision !== lastDerivedEditorRevision) {
-      editorRefreshPromise = refreshEditedTerrain();
+    const currentConfig = terrainEditSession.getTerrain().config;
+    const derivedConfigChanged =
+      (options.buildFoliage !== undefined && options.buildFoliage !== currentConfig.buildFoliage) ||
+      hasPartialConfigChange(currentConfig.features, options.features) ||
+      hasPartialConfigChange(currentConfig.poi, options.poi) ||
+      hasPartialConfigChange(currentConfig.rivers, options.rivers);
+    if (
+      terrainEditSession.getState().revision !== lastDerivedEditorRevision ||
+      derivedConfigChanged
+    ) {
+      editorRefreshPromise = refreshEditedTerrain(options);
     }
     await editorRefreshPromise;
   };
@@ -1385,4 +1420,13 @@ function hasCameraStateChanged(
     !previous.position.equals(next.position) ||
     !previous.target.equals(next.target)
   );
+}
+
+function hasPartialConfigChange(
+  current: object,
+  next: object | undefined
+): boolean {
+  if (!next) return false;
+  const currentValues = current as Record<string, unknown>;
+  return Object.entries(next).some(([key, value]) => currentValues[key] !== value);
 }

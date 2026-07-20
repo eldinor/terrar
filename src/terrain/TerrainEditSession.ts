@@ -164,6 +164,23 @@ export class TerrainEditSession {
     return this.commitPatch(before);
   }
 
+  /** Smooths the complete authoritative heightfield as one undo command. */
+  smoothWorld(strength: number, passes: number): boolean {
+    const blend = Math.max(0, Math.min(1, strength));
+    const passCount = Math.max(1, Math.min(20, Math.round(passes)));
+    if (blend === 0) return false;
+
+    const before = new Map<number, number>();
+    this.heights.forEach((height, index) => before.set(index, height));
+    for (let pass = 0; pass < passCount; pass += 1) {
+      const source = this.heights.slice();
+      for (let index = 0; index < this.heights.length; index += 1) {
+        this.heights[index] = this.applyToolValue("smooth", index, blend, source);
+      }
+    }
+    return this.commitPatch(before);
+  }
+
   undo(): boolean {
     const patch = this.undoStack.pop();
     if (!patch) return false;

@@ -253,8 +253,13 @@ export function App() {
               <EditorPanel bridge={bridge} state={editorState} />
             ) : (
               <FeaturePanel
+                editorState={editorState}
                 onApplyFeatures={handleRebuildTerrain}
                 onChange={handleFeaturePanelChange}
+                onRefreshFeatures={() => bridge?.refreshEditorFeatures()}
+                onSmoothWorld={(strength, passes, refreshFeatures) =>
+                  bridge?.smoothWorld(strength, passes, refreshFeatures)
+                }
                 state={snapshot.featurePanelState}
                 statusText={snapshot.featureStatusText}
               />
@@ -489,15 +494,31 @@ function LeftPanel({
 }
 
 interface FeaturePanelProps {
+  readonly editorState: EditorPanelState | null;
   readonly onApplyFeatures: () => void | Promise<void>;
   readonly onChange: (state: FeaturePanelState) => void;
+  readonly onRefreshFeatures: () => void | Promise<void>;
+  readonly onSmoothWorld: (strength: number, passes: number, refreshFeatures: boolean) => void | Promise<void>;
   readonly state: FeaturePanelState;
   readonly statusText: string;
 }
 
-function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeaturePanelProps) {
+function FeaturePanel({ editorState, onApplyFeatures, onChange, onRefreshFeatures, onSmoothWorld, state, statusText }: FeaturePanelProps) {
+  const [smoothStrength, setSmoothStrength] = useState(0.35);
+  const [smoothPasses, setSmoothPasses] = useState(2);
+  const [refreshAfterSmoothing, setRefreshAfterSmoothing] = useState(false);
+  const [smoothingWorld, setSmoothingWorld] = useState(false);
   const update = (updater: (current: FeaturePanelState) => FeaturePanelState) => {
     onChange(updater(state));
+  };
+  const handleSmoothWorld = async (): Promise<void> => {
+    if (smoothingWorld) return;
+    setSmoothingWorld(true);
+    try {
+      await onSmoothWorld(smoothStrength, smoothPasses, refreshAfterSmoothing);
+    } finally {
+      setSmoothingWorld(false);
+    }
   };
 
   return (
@@ -550,6 +571,47 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
       >
         Apply Features
       </button>
+
+      <div className="editor-divider" />
+      <div className="editor-card editor-smooth-world-panel">
+        <div className="editor-section-label" style={{ marginTop: 0 }}>World Smoothing</div>
+        <SliderField label="Strength" min={0.05} max={1} step={0.05} value={smoothStrength} onChange={setSmoothStrength} />
+        <SliderField label="Passes" min={1} max={8} step={1} value={smoothPasses} onChange={setSmoothPasses} />
+        <label className="editor-checkbox-row">
+          <input
+            className="editor-checkbox-input"
+            checked={refreshAfterSmoothing}
+            onChange={(event) => setRefreshAfterSmoothing(event.target.checked)}
+            type="checkbox"
+          />
+          <span className="editor-checkbox-box" />
+          <span>Refresh Features After</span>
+        </label>
+        <button
+          className="editor-button is-active"
+          disabled={smoothingWorld}
+          onClick={() => void handleSmoothWorld()}
+          style={topMarginStyle}
+          type="button"
+        >
+          {smoothingWorld ? "Smoothing World..." : "Smooth World"}
+        </button>
+        <div className="editor-status" style={topMarginStyle}>
+          {editorState?.derivedDirty
+            ? "Terrain changed. Click Refresh World Features to regenerate rivers, water, roads, POIs, resources, and foliage."
+            : "Smooths the full heightfield as one undoable edit."}
+        </div>
+        {editorState?.derivedDirty ? (
+          <button
+            className="editor-button"
+            disabled={smoothingWorld}
+            onClick={() => void onRefreshFeatures()}
+            type="button"
+          >
+            Refresh World Features
+          </button>
+        ) : null}
+      </div>
 
       {state.features.poi ? (
         <>

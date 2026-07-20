@@ -95,6 +95,7 @@ export interface DemoBridge {
   selectAllEditorTerrain(): void;
   undoTerrainEdit(): void;
   redoTerrainEdit(): void;
+  smoothWorld(strength: number, passes: number, refreshFeatures: boolean): Promise<void>;
   refreshEditorFeatures(): Promise<void>;
 }
 
@@ -336,6 +337,21 @@ export function redoTerrainEdit(): void {
   const demo = requireContext().demo;
   if (demo.getTerrainEditSession().redo()) demo.applyTerrainEditChanges();
   publishSnapshot();
+}
+
+export async function smoothWorld(
+  strength: number,
+  passes: number,
+  refreshFeatures: boolean
+): Promise<void> {
+  const demo = requireContext().demo;
+  if (!demo.getTerrainEditSession().smoothWorld(strength, passes)) return;
+  demo.applyTerrainEditChanges();
+  publishSnapshot();
+  if (refreshFeatures) {
+    await demo.flushTerrainEdits();
+    publishSnapshot();
+  }
 }
 
 export async function refreshEditorFeatures(): Promise<void> {

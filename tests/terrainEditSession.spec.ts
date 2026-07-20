@@ -77,6 +77,18 @@ describe("TerrainEditSession", () => {
     expect(session.getHeightAt({ x: 2, z: 2 })).toBe(0);
   });
 
+  it("smooths the whole world in multiple passes as one undo command", () => {
+    const session = new TerrainEditSession(createTerrain());
+    session.beginStroke("raise", { x: 2, z: 2 }, { radius: 0.6, strength: 10, hardness: 1 });
+    session.commitStroke();
+    const raisedHeight = session.getHeightAt({ x: 2, z: 2 });
+
+    expect(session.smoothWorld(0.5, 3)).toBe(true);
+    expect(session.getHeightAt({ x: 2, z: 2 })).toBeLessThan(raisedHeight);
+    session.undo();
+    expect(session.getHeightAt({ x: 2, z: 2 })).toBe(raisedHeight);
+  });
+
   it("never mutates the source terrain buffer", () => {
     const terrain = createTerrain();
     const original = new Float32Array(terrain.packedSnapshot.buffer).slice();

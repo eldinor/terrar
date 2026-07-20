@@ -435,7 +435,6 @@ export function createTerrainDemo(
   let editorRectangleStart: { x: number; z: number } | null = null;
   let editorRefreshPromise: Promise<void> = Promise.resolve();
   let lastDerivedEditorRevision = 0;
-  let editorDerivedDirty = false;
   const cursorPointCount = 65;
   let editorCursor: LinesMesh | null = null;
   let editorBrushRing: Mesh | null = null;
@@ -792,8 +791,18 @@ export function createTerrainDemo(
     maxZ: Math.max(start.z, end.z) + radius
   });
 
+  const refreshEditedTerrainMaterial = (): void => {
+    const terrainMaterials = new Set(
+      scene.meshes
+        .filter((mesh) => isTerrainChunkMesh(mesh.name))
+        .map((mesh) => mesh.material)
+        .filter((material) => material !== null)
+    );
+    terrainMaterials.forEach((material) => material.markDirty(true));
+  };
+
   const finishEditorAction = (): void => {
-    editorDerivedDirty = true;
+    refreshEditedTerrainMaterial();
     editorInputLocked = true;
     window.requestAnimationFrame(() => {
       editorInputLocked = false;
@@ -998,7 +1007,6 @@ export function createTerrainDemo(
       terrain = nextTerrain;
       terrainEditSession.replaceTerrain(nextTerrain);
       lastDerivedEditorRevision = terrainEditSession.getState().revision;
-      editorDerivedDirty = false;
       terrainAdapter = createTerrainAdapter(
         terrain,
         nextTextureOptions,
@@ -1092,7 +1100,6 @@ export function createTerrainDemo(
       else {
         terrainEditSession.replaceTerrain(nextTerrain);
         lastDerivedEditorRevision = terrainEditSession.getState().revision;
-        editorDerivedDirty = false;
       }
       terrainAdapter = createTerrainAdapter(
         terrain,
@@ -1148,7 +1155,6 @@ export function createTerrainDemo(
     if (revision !== terrainEditSession.getState().revision || refreshVersion !== buildVersion) return;
     await importTerrainAsset(refreshed, true);
     lastDerivedEditorRevision = revision;
-    editorDerivedDirty = false;
   };
 
   const flushTerrainEdits = async (): Promise<void> => {
@@ -1198,10 +1204,11 @@ export function createTerrainDemo(
     getEditorEnabled: () => editorEnabled,
     applyTerrainEditChanges: () => {
       applyEditedHeightsToMeshes();
-      editorDerivedDirty = true;
+      refreshEditedTerrainMaterial();
       renderController.markSceneMutated();
     },
-    getEditorDerivedDirty: () => editorDerivedDirty,
+    getEditorDerivedDirty: () =>
+      terrainEditSession.getState().revision !== lastDerivedEditorRevision,
     setEditorSettings: (settings: TerrainEditorSettings) => {
       editorSettings = settings;
       updateSelectionVisual();

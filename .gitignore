@@ -1,7 +1,8 @@
 node_modules/
 dist/
 dist-demo/
-docs/
+docs/*
+!docs/terrain-editor.md
 
 coverage/
 *.log

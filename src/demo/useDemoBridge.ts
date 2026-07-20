@@ -5,6 +5,7 @@ const EMPTY_SNAPSHOT: DemoSnapshot = {
   activePanelTab: "runtime",
   featurePanelMount: null,
   featurePanelState: null,
+  editorPanelState: null,
   featureStatusText: "",
   footerMount: null,
   footerPerformanceMount: null,

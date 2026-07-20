@@ -5,7 +5,7 @@ import {
   WorldBuildWorkerRequest,
   WorldBuildWorkerResponse
 } from "../TerrainBuildMessages";
-import { buildSerializedWorldData } from "../TerrainWorldBuild";
+import { buildSerializedWorldData, rebuildSerializedWorldDataFromHeight } from "../TerrainWorldBuild";
 
 const workerScope = globalThis as unknown as {
   onmessage: ((event: MessageEvent<WorldBuildWorkerRequest>) => void) | null;
@@ -17,15 +17,10 @@ const workerScope = globalThis as unknown as {
 
 workerScope.onmessage = (event: MessageEvent<WorldBuildWorkerRequest>) => {
   const message = event.data;
-  if (message.type !== "buildWorld") {
-    return;
-  }
-
   try {
-    const data = buildSerializedWorldData(
-      message.config,
-      message.preferSharedSnapshot
-    );
+    const data = message.type === "rebuildEditedWorld"
+      ? rebuildSerializedWorldDataFromHeight(message.config, message.snapshot, message.preferSharedSnapshot)
+      : buildSerializedWorldData(message.config, message.preferSharedSnapshot);
     const response: BuildWorldSuccessResponse = {
       type: "worldBuilt",
       buildVersion: message.buildVersion,

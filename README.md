@@ -2,6 +2,11 @@
 
 Terrain generation, Babylon rendering, and export tooling.
 
+## User Guides
+
+- [Terrain Editor Mode](docs/terrain-editor.md) — sculpting, selection tools, whole-world smoothing, feature refreshes, controls, undo/redo, and exports.
+- [Changelog](CHANGELOG.md) — release history and notable changes.
+
 ## Package Surfaces
 
 - `terrar/builder`

@@ -1,6 +1,7 @@
 import { TerrainConfig } from "./TerrainConfig";
 import {
   ProceduralGenerator,
+  type ProceduralGeneratorSnapshot,
 } from "./ProceduralGenerator";
 import { packTerrainSnapshot } from "./TerrainSnapshotLayout";
 import { TerrainPoiPlanner } from "./TerrainPoiPlanner";
@@ -57,6 +58,43 @@ export function buildSerializedWorldData(
         }))
     : [];
 
+  return {
+    poiSites,
+    roads,
+    snapshot: {
+      ...packTerrainSnapshot(generator.createSnapshot(), preferSharedSnapshot),
+      shared: preferSharedSnapshot && typeof SharedArrayBuffer !== "undefined"
+    }
+  };
+}
+
+export function rebuildSerializedWorldDataFromHeight(
+  config: TerrainConfig,
+  snapshot: ProceduralGeneratorSnapshot,
+  preferSharedSnapshot = false
+): SerializedWorldBuildData {
+  const generator = new ProceduralGenerator(config, snapshot, true);
+  const poiSites = config.features.poi
+    ? new TerrainPoiPlanner(config, generator).generateSites().map<SerializedTerrainPoi>((site) => ({
+        id: site.id,
+        kind: site.kind,
+        x: site.x,
+        y: site.y,
+        z: site.z,
+        score: site.score,
+        radius: site.radius,
+        tags: [...site.tags]
+      }))
+    : [];
+  const roads = config.features.poi && config.features.roads
+    ? new TerrainRoadPlanner(config, generator).generateRoads(poiSites).map<SerializedTerrainRoad>((road) => ({
+        id: road.id,
+        fromPoiId: road.fromPoiId,
+        toPoiId: road.toPoiId,
+        points: road.points.map((point) => ({ x: point.x, y: point.y, z: point.z })),
+        cost: road.cost
+      }))
+    : [];
   return {
     poiSites,
     roads,

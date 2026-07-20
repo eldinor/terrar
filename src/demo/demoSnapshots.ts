@@ -17,6 +17,17 @@ import type {
 import type { TerrainBuildProfile, TerrainBuildStatus, TerrainWorkerStatus } from "./createTerrainDemo";
 import type { DraftConfig } from "./demoState";
 import type { TerrainFoliageStats } from "../terrain/TerrainFoliageSystem";
+import type { TerrainEditorSettings } from "./createTerrainDemo";
+
+export interface EditorPanelState {
+  readonly enabled: boolean;
+  readonly settings: TerrainEditorSettings;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly hasSelection: boolean;
+  readonly selectedSampleCount: number;
+  readonly derivedDirty: boolean;
+}
 
 export interface FeaturePanelState {
   readonly features: TerrainFeatureConfig;
@@ -78,6 +89,7 @@ export function buildHudText(args: {
   readonly poi: TerrainPoiStats;
   readonly roads: TerrainRoadStats;
   readonly statusMessage?: string;
+  readonly texturesEnabled: boolean;
   readonly wireframe: boolean;
   readonly workerStatus: TerrainWorkerStatus;
 }): string {
@@ -91,6 +103,7 @@ export function buildHudText(args: {
   const statusText = args.statusMessage ? ` | ${args.statusMessage}` : "";
   return (
     `G debug: ${debugState} | V wireframe: ${args.wireframe ? "on" : "off"} | ` +
+    `T textures: ${args.texturesEnabled ? "on" : "off"} | ` +
     `foliage: ${args.foliage.visibleInstances}/${args.foliage.totalInstances} ` +
     `(T ${args.foliage.visibleTrees}/${args.foliage.totalTrees}, ` +
     `B ${args.foliage.visibleBushes}/${args.foliage.totalBushes}, ` +

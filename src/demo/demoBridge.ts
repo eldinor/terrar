@@ -42,6 +42,7 @@ import {
   buildRuntimeTabState,
   buildWorldTabState,
   type FeaturePanelState,
+  type EditorPanelState,
   type MaterialTabState,
   type RuntimeTabState,
   type WorldTabState,
@@ -72,8 +73,8 @@ export interface DemoBridge {
   getWorldTabState(): WorldTabState;
   subscribe(listener: () => void): () => void;
   applyPresetByIndex(index: number): Promise<void>;
-  exportTerrainBundle(): void;
-  exportTerrainHeightmap(): void;
+  exportTerrainBundle(): Promise<void>;
+  exportTerrainHeightmap(): Promise<void>;
   importTerrainAssetText(serialized: string): Promise<void>;
   saveCurrentPreset(name: string): void;
   exportPresetByIndex(index: number): void;
@@ -87,6 +88,15 @@ export interface DemoBridge {
   setRuntimeTabState(state: RuntimeTabState): void;
   setForceLod0(enabled: boolean): void;
   setWorldTabState(state: WorldTabState): void;
+  setEditorEnabled(enabled: boolean): void;
+  setEditorSettings(settings: EditorPanelState["settings"]): void;
+  applyEditorSelection(): void;
+  clearEditorSelection(): void;
+  selectAllEditorTerrain(): void;
+  undoTerrainEdit(): void;
+  redoTerrainEdit(): void;
+  smoothWorld(strength: number, passes: number, refreshFeatures: boolean): Promise<void>;
+  refreshEditorFeatures(): Promise<void>;
 }
 
 /**
@@ -96,6 +106,7 @@ export interface DemoSnapshot {
   readonly activePanelTab: PanelTab;
   readonly featurePanelMount: HTMLElement | null;
   readonly featurePanelState: FeaturePanelState | null;
+  readonly editorPanelState: EditorPanelState | null;
   readonly featureStatusText: string;
   readonly footerMount: HTMLElement | null;
   readonly footerPerformanceMount: HTMLElement | null;
@@ -114,6 +125,7 @@ export interface DemoSnapshot {
 let context: DemoBridgeContext | null = null;
 let buildStatus = { phase: "idle", message: "", completed: 0, total: 0 } as ReturnType<TerrainDemo["getBuildStatus"]>;
 let wireframe = false;
+let texturesEnabled = true;
 let debugVisible = false;
 let loadingDebug = false;
 let draftConfig: DraftConfig | null = null;
@@ -124,17 +136,26 @@ let transientHudTimeoutId: number | null = null;
 let performanceText = "";
 const snapshotListeners = new Set<() => void>();
 let currentSnapshot: DemoSnapshot | null = null;
+let terrainEditSnapshotScheduled = false;
+let terrainEditSubscriptionVersion = 0;
+let unsubscribeTerrainEditSession: (() => void) | null = null;
 
 /**
  * Wires the demo runtime to the DOM mounts used by the React UI.
  */
 export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
+  unsubscribeTerrainEditSession?.();
+  unsubscribeTerrainEditSession = null;
+  terrainEditSnapshotScheduled = false;
+  terrainEditSubscriptionVersion += 1;
+
   context = nextContext;
   buildStatus = nextContext.demo.getBuildStatus();
   draftConfig = buildDraftConfig();
   presetOptions = getPresetOptions(draftConfig.poiDebug);
   activeTab = "runtime";
   wireframe = false;
+  texturesEnabled = nextContext.demo.getTexturesEnabled();
   debugVisible = false;
   loadingDebug = false;
   transientHudMessage = "";
@@ -174,13 +195,28 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
     renderMaterialTabState();
     renderWorldTabState();
   });
+  unsubscribeTerrainEditSession = nextContext.demo
+    .getTerrainEditSession()
+    .subscribe(scheduleTerrainEditSnapshot);
 
   window.addEventListener("keydown", async (event) => {
-    if (event.repeat) {
+    if (event.repeat || isEditableKeyboardTarget(event.target)) {
       return;
     }
 
     const current = requireContext();
+
+    if (event.key.toLowerCase() === "e") {
+      setEditorEnabled(!current.demo.getEditorEnabled());
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && ["y", "z"].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      if (event.shiftKey || event.key.toLowerCase() === "y") redoTerrainEdit();
+      else undoTerrainEdit();
+      return;
+    }
 
     if (event.key.toLowerCase() === "g") {
       if (loadingDebug) {
@@ -197,6 +233,12 @@ export function initializeDemoBridge(nextContext: DemoBridgeContext): void {
     if (event.key.toLowerCase() === "v") {
       wireframe = !wireframe;
       current.demo.setWireframe(wireframe);
+      renderHud();
+    }
+
+    if (event.key.toLowerCase() === "t") {
+      texturesEnabled = !texturesEnabled;
+      current.demo.setTexturesEnabled(texturesEnabled);
       renderHud();
     }
   });
@@ -236,9 +278,114 @@ export function getHudText(): string {
     poi: current.demo.getPoiStats(),
     roads: current.demo.getRoadStats(),
     statusMessage: transientHudMessage,
+    texturesEnabled,
     wireframe,
     workerStatus: current.demo.getWorkerStatus(),
   });
+}
+
+export function getEditorPanelState(): EditorPanelState {
+  const demo = requireContext().demo;
+  const sessionState = demo.getTerrainEditSession().getState();
+  const draft = requireDraftConfig();
+  const liveConfig = demo.getTerrainConfig();
+  const derivedConfigDirty =
+    draft.buildFoliage !== liveConfig.buildFoliage ||
+    hasConfigValueChanges(liveConfig.features, draft.features) ||
+    hasConfigValueChanges(liveConfig.poi, draft.poi) ||
+    hasConfigValueChanges(liveConfig.rivers, draft.rivers);
+  return {
+    enabled: demo.getEditorEnabled(),
+    settings: demo.getEditorSettings(),
+    canUndo: sessionState.canUndo,
+    canRedo: sessionState.canRedo,
+    hasSelection: sessionState.hasSelection,
+    selectedSampleCount: sessionState.selectedSampleCount,
+    derivedDirty: demo.getEditorDerivedDirty() || derivedConfigDirty
+  };
+}
+
+export function setEditorEnabled(enabled: boolean): void {
+  requireContext().demo.setEditorEnabled(enabled);
+  publishSnapshot();
+}
+
+export function setEditorSettings(settings: EditorPanelState["settings"]): void {
+  requireContext().demo.setEditorSettings(settings);
+  publishSnapshot();
+}
+
+export function applyEditorSelection(): void {
+  const demo = requireContext().demo;
+  const settings = demo.getEditorSettings();
+  if (demo.getTerrainEditSession().applyToSelection(settings.tool, settings.brush.strength)) {
+    demo.applyTerrainEditChanges();
+  }
+  publishSnapshot();
+}
+
+export function clearEditorSelection(): void {
+  requireContext().demo.getTerrainEditSession().clearSelection();
+  publishSnapshot();
+}
+
+export function selectAllEditorTerrain(): void {
+  requireContext().demo.getTerrainEditSession().selectAll();
+  publishSnapshot();
+}
+
+export function undoTerrainEdit(): void {
+  const demo = requireContext().demo;
+  if (demo.getTerrainEditSession().undo()) demo.applyTerrainEditChanges();
+  publishSnapshot();
+}
+
+export function redoTerrainEdit(): void {
+  const demo = requireContext().demo;
+  if (demo.getTerrainEditSession().redo()) demo.applyTerrainEditChanges();
+  publishSnapshot();
+}
+
+export async function smoothWorld(
+  strength: number,
+  passes: number,
+  refreshFeatures: boolean
+): Promise<void> {
+  const demo = requireContext().demo;
+  if (!demo.getTerrainEditSession().smoothWorld(strength, passes)) return;
+  demo.applyTerrainEditChanges();
+  publishSnapshot();
+  if (refreshFeatures) {
+    await refreshEditedFeaturesFromDraft(demo);
+    publishSnapshot();
+  }
+}
+
+export async function refreshEditorFeatures(): Promise<void> {
+  await refreshEditedFeaturesFromDraft(requireContext().demo);
+  publishSnapshot();
+}
+
+async function refreshEditedFeaturesFromDraft(demo: TerrainDemo): Promise<void> {
+  const draft = requireDraftConfig();
+  await demo.flushTerrainEdits({
+    buildFoliage: draft.buildFoliage,
+    features: { ...draft.features },
+    poi: { ...draft.poi },
+    rivers: { ...draft.rivers }
+  });
+  demo.setShowPoi(draft.features.poi);
+  demo.setShowRoads(draft.features.poi && draft.features.roads);
+  demo.setShowFoliage(draft.buildFoliage && draft.showFoliage);
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  if (!element || typeof element.tagName !== "string") {
+    return false;
+  }
+
+  return element.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName);
 }
 
 export function getHudStatusText(): string {
@@ -493,9 +640,10 @@ export function getPerformanceText(): string {
 /**
  * Exports the current terrain as a browser-downloaded ZIP bundle.
  */
-export function exportTerrainBundle(): void {
+export async function exportTerrainBundle(): Promise<void> {
   try {
     const current = requireContext();
+    await current.demo.flushTerrainEdits();
     const terrain = current.demo.getTerrainAsset();
     const bundle = createTerrainExportBundle(terrain);
     const encoded = encodeTerrainExportFiles(bundle);
@@ -517,9 +665,11 @@ export function exportTerrainBundle(): void {
 /**
  * Exports the current terrain heightmap as a grayscale PNG.
  */
-export function exportTerrainHeightmap(): void {
+export async function exportTerrainHeightmap(): Promise<void> {
   try {
-    const terrain = requireContext().demo.getTerrainAsset();
+    const demo = requireContext().demo;
+    await demo.flushTerrainEdits();
+    const terrain = demo.getTerrainAsset();
     const heightmap = createTerrainHeightmap(terrain);
     downloadBinaryFile(
       `${slugifyPresetName(`terrain-${terrain.config.seed}`)}-heightmap.png`,
@@ -584,6 +734,10 @@ export function importPresetText(serialized: string): void {
  * Rebuilds the terrain from the current draft configuration.
  */
 export async function rebuildTerrainFromDraft(): Promise<void> {
+  const demo = requireContext().demo;
+  if (demo.getTerrainEditSession().getState().canUndo && typeof window.confirm === "function") {
+    if (!window.confirm("Rebuilding terrain will replace all sculpt edits. Continue?")) return;
+  }
   await applyDraftToWorld();
 }
 
@@ -803,6 +957,34 @@ function publishSnapshot(): void {
   snapshotListeners.forEach((listener) => listener());
 }
 
+function hasConfigValueChanges(current: object, next: object): boolean {
+  const currentValues = current as Record<string, unknown>;
+  return Object.entries(next).some(([key, value]) => currentValues[key] !== value);
+}
+
+function scheduleTerrainEditSnapshot(): void {
+  if (terrainEditSnapshotScheduled) {
+    return;
+  }
+
+  terrainEditSnapshotScheduled = true;
+  const subscriptionVersion = terrainEditSubscriptionVersion;
+  const publish = (): void => {
+    if (subscriptionVersion !== terrainEditSubscriptionVersion) {
+      return;
+    }
+
+    terrainEditSnapshotScheduled = false;
+    publishSnapshot();
+  };
+
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(publish);
+  } else {
+    queueMicrotask(publish);
+  }
+}
+
 function setTransientHudMessage(message: string, durationMs = 3000): void {
   transientHudMessage = message;
   renderHud();
@@ -823,6 +1005,7 @@ function createSnapshot(): DemoSnapshot {
     activePanelTab: getActivePanelTab(),
     featurePanelMount: document.getElementById("react-feature-panel"),
     featurePanelState: getFeaturePanelState(),
+    editorPanelState: getEditorPanelState(),
     featureStatusText: getFeatureBuildStatusText(),
     footerMount: document.getElementById("react-footer-status"),
     footerPerformanceMount: document.getElementById("react-footer-performance"),

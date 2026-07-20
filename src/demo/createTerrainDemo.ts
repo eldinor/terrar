@@ -1,9 +1,18 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { ArcRotateCameraPointersInput } from "@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput";
+import "@babylonjs/core/Culling/ray";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Scene } from "@babylonjs/core/scene";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
+import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { LinesMesh } from "@babylonjs/core/Meshes/linesMesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import {
   buildTerrain,
   BuiltTerrain,
@@ -33,6 +42,37 @@ import { TerrainChunkBuildCoordinator } from "../terrain/TerrainChunkBuildCoordi
 import { TerrainSystem } from "../terrain/TerrainSystem";
 import { TerrainChunkBuildProfile } from "../terrain/TerrainChunkMeshRuntime";
 import { TerrainFoliageStats } from "../terrain/TerrainFoliageSystem";
+import {
+  TerrainEditSession,
+  type TerrainBrushSettings,
+  type TerrainEditTool,
+  type TerrainSelectionMode
+} from "../terrain/TerrainEditSession";
+
+export type TerrainEditorWorkflow = "sculpt" | "select";
+export type TerrainSelectionShape = "brush" | "rectangle";
+
+export interface TerrainEditorSettings {
+  readonly workflow: TerrainEditorWorkflow;
+  readonly tool: TerrainEditTool;
+  readonly selectionShape: TerrainSelectionShape;
+  readonly selectionMode: TerrainSelectionMode;
+  readonly brush: TerrainBrushSettings;
+}
+
+export interface TerrainDerivedRefreshOptions {
+  readonly features?: BuiltTerrainConfig["features"];
+  readonly poi?: BuiltTerrainConfig["poi"];
+  readonly rivers?: BuiltTerrainConfig["rivers"];
+  readonly buildFoliage?: boolean;
+}
+
+interface TerrainEditorBounds {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
 
 /**
  * Runtime API exposed by the interactive terrain demo.
@@ -42,12 +82,22 @@ export interface TerrainDemo {
   readonly scene: Scene;
   readonly camera: ArcRotateCamera;
   readonly getTerrainAsset: () => BuiltTerrain;
+  readonly getTerrainEditSession: () => TerrainEditSession;
+  readonly setEditorEnabled: (enabled: boolean) => void;
+  readonly getEditorEnabled: () => boolean;
+  readonly setEditorSettings: (settings: TerrainEditorSettings) => void;
+  readonly getEditorSettings: () => TerrainEditorSettings;
+  readonly flushTerrainEdits: (options?: TerrainDerivedRefreshOptions) => Promise<void>;
+  readonly applyTerrainEditChanges: () => void;
+  readonly getEditorDerivedDirty: () => boolean;
   readonly importTerrainAsset: (terrain: BuiltTerrain) => Promise<void>;
   readonly beginRendering: () => void;
   readonly stopRendering: () => void;
   readonly suspendRendering: () => RenderSuspendToken;
   readonly markSceneMutated: () => void;
   readonly setWireframe: (enabled: boolean) => void;
+  readonly setTexturesEnabled: (enabled: boolean) => void;
+  readonly getTexturesEnabled: () => boolean;
   readonly toggleDebugOverlay: () => Promise<boolean>;
   readonly setWaterLevel: (level: number) => void;
   readonly getWaterLevel: () => number;
@@ -216,7 +266,11 @@ export function createTerrainDemo(
   camera.upperRadiusLimit = 2000;
   camera.wheelDeltaPercentage = 0.01;
   camera.panningSensibility = 120;
-  camera.attachControl(canvas, true);
+  camera.attachControl(false, false, 1);
+  const cameraPointerInput = camera.inputs.attached.pointers as ArcRotateCameraPointersInput | undefined;
+  const defaultCameraPointerButtons = cameraPointerInput
+    ? [...cameraPointerInput.buttons]
+    : [0, 1, 2];
 
   const light = new HemisphericLight("terrain-light", new Vector3(0.4, 1, 0.2), scene);
   light.intensity = 0.95;
@@ -304,6 +358,7 @@ export function createTerrainDemo(
           return;
         }
         renderActivityState.awaitingChunkMeshes = false;
+        updateEditorPickability();
         renderController.markSceneMutated();
       });
 
@@ -368,6 +423,173 @@ export function createTerrainDemo(
       }
     });
   terrainAdapter.update(camera.position);
+  const terrainEditSession = new TerrainEditSession(terrain);
+  let editorEnabled = false;
+  let editorSettings: TerrainEditorSettings = {
+    workflow: "sculpt",
+    tool: "raise",
+    selectionShape: "brush",
+    selectionMode: "add",
+    brush: { radius: 40, strength: 1, hardness: 0 }
+  };
+  let editorPointerActive = false;
+  let editorInputLocked = false;
+  let editorLastEditPoint: { x: number; z: number } | null = null;
+  let editorNavigationButton: 1 | 2 | null = null;
+  let editorNavigationPointerId: number | null = null;
+  let editorNavigationX = 0;
+  let editorNavigationY = 0;
+  let editorRectangleStart: { x: number; z: number } | null = null;
+  let editorRefreshPromise: Promise<void> = Promise.resolve();
+  let lastDerivedEditorRevision = 0;
+  const cursorPointCount = 65;
+  let editorCursor: LinesMesh | null = null;
+  let editorBrushRing: Mesh | null = null;
+  let editorSelectionMesh: Mesh | null = null;
+  let editorRectanglePreview: LinesMesh | null = null;
+  let selectionVisualFrame: number | null = null;
+
+  const updateEditorCursor = (point: { x: number; z: number } | null): void => {
+    if (!editorEnabled || !point) {
+      if (editorCursor) editorCursor.isVisible = false;
+      if (editorBrushRing) editorBrushRing.isVisible = false;
+      return;
+    }
+    const points = Array.from({ length: cursorPointCount }, (_, index) => {
+      const angle = (index / (cursorPointCount - 1)) * Math.PI * 2;
+      const x = point.x + Math.cos(angle) * editorSettings.brush.radius;
+      const z = point.z + Math.sin(angle) * editorSettings.brush.radius;
+      return new Vector3(x, terrainEditSession.sampleHeight({ x, z }) + 0.35, z);
+    });
+    editorCursor = MeshBuilder.CreateLines("terrain-editor-cursor", {
+      points,
+      updatable: true,
+      instance: editorCursor ?? undefined
+    }, scene);
+    editorCursor.color = editorSettings.workflow === "select" && editorSettings.selectionMode === "subtract"
+      ? new Color3(0.95, 0.36, 0.32)
+      : new Color3(0.2, 0.82, 1);
+    editorCursor.alpha = 0.95;
+    editorCursor.isPickable = false;
+    editorCursor.isVisible = true;
+    if (!editorBrushRing) {
+      editorBrushRing = MeshBuilder.CreateTorus("editor-brush-ring", {
+        diameter: 2,
+        thickness: 0.055,
+        tessellation: 64
+      }, scene);
+      const material = new StandardMaterial("editor-brush-ring-material", scene);
+      material.disableLighting = true;
+      material.specularColor = Color3.Black();
+      material.alpha = 0.92;
+      material.disableDepthWrite = true;
+      editorBrushRing.material = material;
+      editorBrushRing.renderingGroupId = 2;
+      editorBrushRing.isPickable = false;
+    }
+    const ringColor = editorSettings.workflow === "select" && editorSettings.selectionMode === "subtract"
+      ? new Color3(1, 0.18, 0.12)
+      : new Color3(0.08, 0.82, 1);
+    const ringMaterial = editorBrushRing.material as StandardMaterial;
+    ringMaterial.diffuseColor = ringColor;
+    ringMaterial.emissiveColor = ringColor;
+    editorBrushRing.position.set(
+      point.x,
+      terrainEditSession.sampleHeight(point) + 1.4,
+      point.z
+    );
+    editorBrushRing.scaling.setAll(editorSettings.brush.radius);
+    editorBrushRing.scaling.y = Math.max(1, editorSettings.brush.radius * 0.025);
+    editorBrushRing.isVisible = true;
+    renderController.markSceneMutated();
+  };
+
+  const updateSelectionVisual = (): void => {
+    selectionVisualFrame = null;
+    editorSelectionMesh?.dispose(false, true);
+    editorSelectionMesh = null;
+    if (!editorEnabled || editorSettings.workflow !== "select") return;
+    const selection = terrainEditSession.getSelection();
+    const resolution = terrain.packedSnapshot.analysisResolution;
+    const step = terrain.packedSnapshot.analysisStep;
+    const selectedCount = selection.reduce((count, value) => count + (value > 0 ? 1 : 0), 0);
+    if (selectedCount === 0) return;
+    const stride = Math.max(1, Math.ceil(Math.sqrt(selectedCount / 4000)));
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (let z = 0; z < resolution; z += stride) {
+      for (let x = 0; x < resolution; x += stride) {
+        const index = z * resolution + x;
+        if (selection[index] === 0) continue;
+        const x0 = terrain.config.worldMin + x * step;
+        const z0 = terrain.config.worldMin + z * step;
+        const x1 = Math.min(terrain.config.worldMin + terrain.config.worldSize, x0 + step * stride);
+        const z1 = Math.min(terrain.config.worldMin + terrain.config.worldSize, z0 + step * stride);
+        const base = positions.length / 3;
+        positions.push(
+          x0, terrainEditSession.sampleHeight({ x: x0, z: z0 }) + 0.45, z0,
+          x1, terrainEditSession.sampleHeight({ x: x1, z: z0 }) + 0.45, z0,
+          x1, terrainEditSession.sampleHeight({ x: x1, z: z1 }) + 0.45, z1,
+          x0, terrainEditSession.sampleHeight({ x: x0, z: z1 }) + 0.45, z1
+        );
+        indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+      }
+    }
+    if (positions.length > 0) {
+      editorSelectionMesh = new Mesh("terrain-editor-selection", scene);
+      const vertexData = new VertexData();
+      vertexData.positions = positions;
+      vertexData.indices = indices;
+      vertexData.applyToMesh(editorSelectionMesh);
+      const material = new StandardMaterial("terrain-editor-selection-material", scene);
+      material.diffuseColor = new Color3(0.05, 0.55, 0.85);
+      material.emissiveColor = new Color3(0.05, 0.45, 0.75);
+      material.specularColor = Color3.Black();
+      material.alpha = 0.42;
+      material.backFaceCulling = false;
+      material.disableDepthWrite = true;
+      editorSelectionMesh.material = material;
+      editorSelectionMesh.renderingGroupId = 1;
+      editorSelectionMesh.isPickable = false;
+    }
+    renderController.markSceneMutated();
+  };
+
+  const updateRectanglePreview = (end: { x: number; z: number } | null): void => {
+    if (!editorRectangleStart || !end) {
+      if (editorRectanglePreview) editorRectanglePreview.isVisible = false;
+      return;
+    }
+    const corners = [
+      editorRectangleStart,
+      { x: end.x, z: editorRectangleStart.z },
+      end,
+      { x: editorRectangleStart.x, z: end.z },
+      editorRectangleStart
+    ];
+    const points = corners.map((point) => new Vector3(
+      point.x,
+      terrainEditSession.sampleHeight(point) + 0.7,
+      point.z
+    ));
+    editorRectanglePreview = MeshBuilder.CreateLines("terrain-editor-rectangle-preview", {
+      points,
+      updatable: true,
+      instance: editorRectanglePreview ?? undefined
+    }, scene);
+    editorRectanglePreview.color = editorSettings.selectionMode === "subtract"
+      ? new Color3(0.95, 0.36, 0.32)
+      : new Color3(0.2, 0.82, 1);
+    editorRectanglePreview.alpha = 0.95;
+    editorRectanglePreview.isPickable = false;
+    editorRectanglePreview.isVisible = true;
+  };
+
+  terrainEditSession.subscribe(() => {
+    if (selectionVisualFrame === null) {
+      selectionVisualFrame = window.requestAnimationFrame(updateSelectionVisual);
+    }
+  });
   sceneInstrumentation.captureFrameTime = true;
   renderController = createRenderController(engine, {
     forceReadyFrame: renderPolicy.forceReadyFrame,
@@ -415,6 +637,307 @@ export function createTerrainDemo(
   canvas.addEventListener("touchmove", beginInteractiveRendering, { passive: true });
   window.addEventListener("keydown", beginInteractiveRendering);
 
+  const isTerrainChunkMesh = (name: string): boolean => /^terrain-\d+-\d+-lod\d+$/.test(name);
+
+  const pickTerrainPoint = (event: PointerEvent): { x: number; z: number } | null => {
+    const bounds = canvas.getBoundingClientRect();
+    const pointerX = event.clientX - bounds.left;
+    const pointerY = event.clientY - bounds.top;
+    const pick = scene.pick(pointerX, pointerY, (mesh) => isTerrainChunkMesh(mesh.name));
+    if (pick?.hit && pick.pickedPoint) {
+      return { x: pick.pickedPoint.x, z: pick.pickedPoint.z };
+    }
+
+    const ray = scene.createPickingRay(pointerX, pointerY, Matrix.Identity(), camera, false);
+    const maxDistance = Math.max(camera.upperRadiusLimit ?? 2000, terrain.config.worldSize * 2);
+    const step = Math.max(terrain.packedSnapshot.analysisStep, maxDistance / 320);
+    let previousDistance = 0;
+    let previousDelta: number | null = null;
+    const worldMax = terrain.config.worldMin + terrain.config.worldSize;
+    for (let distance = 0; distance <= maxDistance; distance += step) {
+      const position = ray.origin.add(ray.direction.scale(distance));
+      const inside = position.x >= terrain.config.worldMin && position.x <= worldMax &&
+        position.z >= terrain.config.worldMin && position.z <= worldMax;
+      if (!inside) {
+        previousDelta = null;
+        previousDistance = distance;
+        continue;
+      }
+      const delta = position.y - terrainEditSession.sampleHeight({ x: position.x, z: position.z });
+      if (previousDelta !== null && previousDelta >= 0 && delta <= 0) {
+        let low = previousDistance;
+        let high = distance;
+        for (let iteration = 0; iteration < 10; iteration += 1) {
+          const middle = (low + high) * 0.5;
+          const sample = ray.origin.add(ray.direction.scale(middle));
+          const sampleDelta = sample.y - terrainEditSession.sampleHeight({ x: sample.x, z: sample.z });
+          if (sampleDelta > 0) low = middle;
+          else high = middle;
+        }
+        const hit = ray.origin.add(ray.direction.scale((low + high) * 0.5));
+        return { x: hit.x, z: hit.z };
+      }
+      previousDelta = delta;
+      previousDistance = distance;
+    }
+    return null;
+  };
+
+  canvas.addEventListener("contextmenu", (event) => {
+    if (editorEnabled) event.preventDefault();
+  });
+
+  const updateEditorPickability = (): void => {
+    scene.meshes.forEach((mesh) => {
+      if (isTerrainChunkMesh(mesh.name)) mesh.isPickable = editorEnabled;
+    });
+  };
+
+  const applyEditedHeightsToMeshes = (bounds?: TerrainEditorBounds): void => {
+    const affectedChunks = new Set<string>();
+    if (bounds) {
+      const toChunk = (value: number): number => Math.max(0, Math.min(
+        terrain.config.chunksPerAxis - 1,
+        Math.floor((value - terrain.config.worldMin) / terrain.config.chunkSize)
+      ));
+      const minChunkX = toChunk(bounds.minX);
+      const maxChunkX = toChunk(bounds.maxX);
+      const minChunkZ = toChunk(bounds.minZ);
+      const maxChunkZ = toChunk(bounds.maxZ);
+      for (let chunkZ = minChunkZ - 1; chunkZ <= maxChunkZ + 1; chunkZ += 1) {
+        for (let chunkX = minChunkX - 1; chunkX <= maxChunkX + 1; chunkX += 1) {
+          if (chunkX >= 0 && chunkZ >= 0 && chunkX < terrain.config.chunksPerAxis && chunkZ < terrain.config.chunksPerAxis) {
+            affectedChunks.add(`${chunkX}:${chunkZ}`);
+          }
+        }
+      }
+    }
+    scene.meshes.forEach((mesh) => {
+      if (!isTerrainChunkMesh(mesh.name)) return;
+      if (bounds) {
+        const match = mesh.name.match(/^terrain-(\d+)-(\d+)-lod\d+$/);
+        if (!match || !affectedChunks.has(`${match[1]}:${match[2]}`)) return;
+      }
+      const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+      if (!positions) return;
+      const lodMatch = mesh.name.match(/-lod(\d+)$/);
+      const lod = Number(lodMatch?.[1] ?? 0);
+      const resolution = terrain.config.lodResolutions[lod] ?? terrain.config.lodResolutions[0];
+      const surfaceVertexCount = resolution * resolution;
+      for (let vertex = 0; vertex < positions.length / 3; vertex += 1) {
+        const offset = vertex * 3;
+        const surfaceHeight = terrainEditSession.sampleHeight({ x: positions[offset], z: positions[offset + 2] });
+        positions[offset + 1] = vertex < surfaceVertexCount
+          ? surfaceHeight
+          : surfaceHeight - terrain.config.skirtDepth;
+      }
+      const normals = mesh.getVerticesData(VertexBuffer.NormalKind) ?? new Array<number>(positions.length).fill(0);
+      const normalSampleStep = terrain.config.chunkSize / (terrain.config.lodResolutions[0] - 1);
+      const writeSurfaceNormal = (vertex: number): void => {
+        const offset = vertex * 3;
+        const x = positions[offset];
+        const z = positions[offset + 2];
+        const gradientX = (
+          terrainEditSession.sampleHeight({ x: x + normalSampleStep, z }) -
+          terrainEditSession.sampleHeight({ x: x - normalSampleStep, z })
+        ) / (normalSampleStep * 2);
+        const gradientZ = (
+          terrainEditSession.sampleHeight({ x, z: z + normalSampleStep }) -
+          terrainEditSession.sampleHeight({ x, z: z - normalSampleStep })
+        ) / (normalSampleStep * 2);
+        const length = Math.hypot(gradientX, 1, gradientZ);
+        normals[offset] = -gradientX / length;
+        normals[offset + 1] = 1 / length;
+        normals[offset + 2] = -gradientZ / length;
+      };
+      for (let vertex = 0; vertex < surfaceVertexCount; vertex += 1) {
+        writeSurfaceNormal(vertex);
+      }
+
+      const writeSkirtNormal = (
+        skirtVertex: number,
+        topVertex: number,
+        outwardX: number,
+        outwardZ: number
+      ): void => {
+        const skirtOffset = skirtVertex * 3;
+        const topOffset = topVertex * 3;
+        const nx = normals[topOffset] * 0.35 + outwardX * 0.65;
+        const ny = normals[topOffset + 1] * 0.35 - 0.35 * 0.65;
+        const nz = normals[topOffset + 2] * 0.35 + outwardZ * 0.65;
+        const length = Math.hypot(nx, ny, nz);
+        normals[skirtOffset] = nx / length;
+        normals[skirtOffset + 1] = ny / length;
+        normals[skirtOffset + 2] = nz / length;
+      };
+      const northStart = surfaceVertexCount;
+      const southStart = northStart + resolution;
+      const westStart = southStart + resolution;
+      const eastStart = westStart + resolution;
+      for (let sample = 0; sample < resolution; sample += 1) {
+        writeSkirtNormal(northStart + sample, sample, 0, -1);
+        writeSkirtNormal(southStart + sample, (resolution - 1) * resolution + sample, 0, 1);
+        writeSkirtNormal(westStart + sample, sample * resolution, -1, 0);
+        writeSkirtNormal(eastStart + sample, sample * resolution + resolution - 1, 1, 0);
+      }
+      mesh.updateVerticesData(VertexBuffer.PositionKind, positions, true, false);
+      mesh.updateVerticesData(VertexBuffer.NormalKind, normals, true, false);
+      mesh.refreshBoundingInfo(false, false);
+    });
+    renderController.markSceneMutated();
+  };
+
+  const boundsAroundStroke = (
+    start: { x: number; z: number },
+    end: { x: number; z: number },
+    radius: number
+  ): TerrainEditorBounds => ({
+    minX: Math.min(start.x, end.x) - radius,
+    maxX: Math.max(start.x, end.x) + radius,
+    minZ: Math.min(start.z, end.z) - radius,
+    maxZ: Math.max(start.z, end.z) + radius
+  });
+
+  const refreshEditedTerrainMaterial = (): void => {
+    const terrainMaterials = new Set(
+      scene.meshes
+        .filter((mesh) => isTerrainChunkMesh(mesh.name))
+        .map((mesh) => mesh.material)
+        .filter((material) => material !== null)
+    );
+    terrainMaterials.forEach((material) => material.markDirty(true));
+  };
+
+  const finishEditorAction = (): void => {
+    refreshEditedTerrainMaterial();
+    editorInputLocked = true;
+    window.requestAnimationFrame(() => {
+      editorInputLocked = false;
+    });
+  };
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!editorEnabled) return;
+    if (event.button === 1 || event.button === 2) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      editorNavigationButton = event.button;
+      editorNavigationPointerId = event.pointerId;
+      editorNavigationX = event.clientX;
+      editorNavigationY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = event.button === 2 ? "grabbing" : "move";
+      return;
+    }
+    if (event.button !== 0) return;
+    if (editorInputLocked) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    const point = pickTerrainPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    canvas.setPointerCapture(event.pointerId);
+    editorPointerActive = true;
+    updateEditorCursor(point);
+    if (editorSettings.workflow === "sculpt") {
+      terrainEditSession.beginStroke(editorSettings.tool, point, editorSettings.brush);
+      editorLastEditPoint = point;
+      applyEditedHeightsToMeshes(boundsAroundStroke(point, point, editorSettings.brush.radius));
+    } else if (editorSettings.selectionShape === "rectangle") {
+      editorRectangleStart = point;
+    } else {
+      terrainEditSession.paintSelection(point, editorSettings.brush.radius, editorSettings.brush.hardness, editorSettings.selectionMode);
+    }
+  }, true);
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!editorEnabled) return;
+    if (editorNavigationButton !== null && event.pointerId === editorNavigationPointerId) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const dx = event.clientX - editorNavigationX;
+      const dy = event.clientY - editorNavigationY;
+      editorNavigationX = event.clientX;
+      editorNavigationY = event.clientY;
+      if (editorNavigationButton === 2) {
+        camera.alpha -= dx * 0.005;
+        camera.beta = Math.max(0.05, Math.min(Math.PI - 0.05, camera.beta - dy * 0.005));
+      } else {
+        const scale = camera.radius * 0.0018;
+        const screenRight = new Vector3(-Math.sin(camera.alpha), 0, Math.cos(camera.alpha));
+        const screenForward = new Vector3(-Math.cos(camera.alpha), 0, -Math.sin(camera.alpha));
+        camera.target.addInPlace(screenRight.scale(-dx * scale));
+        camera.target.addInPlace(screenForward.scale(dy * scale));
+      }
+      renderController.markSceneMutated();
+      return;
+    }
+    const point = pickTerrainPoint(event);
+    updateEditorCursor(point);
+    if (editorSettings.workflow === "select" && editorSettings.selectionShape === "rectangle") {
+      updateRectanglePreview(point);
+    }
+    if (!editorPointerActive) return;
+    if (!point) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (editorSettings.workflow === "sculpt") {
+      terrainEditSession.appendStroke(point);
+      applyEditedHeightsToMeshes(boundsAroundStroke(
+        editorLastEditPoint ?? point,
+        point,
+        editorSettings.brush.radius
+      ));
+      editorLastEditPoint = point;
+    } else if (editorSettings.selectionShape === "brush") {
+      terrainEditSession.paintSelection(point, editorSettings.brush.radius, editorSettings.brush.hardness, editorSettings.selectionMode);
+    }
+  }, true);
+
+  canvas.addEventListener("pointerup", (event) => {
+    if (editorEnabled && editorNavigationButton !== null && event.pointerId === editorNavigationPointerId) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      editorNavigationButton = null;
+      editorNavigationPointerId = null;
+      canvas.style.cursor = "crosshair";
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      return;
+    }
+    if (!editorEnabled || !editorPointerActive || event.button !== 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const point = pickTerrainPoint(event);
+    if (editorSettings.workflow === "sculpt") {
+      if (terrainEditSession.commitStroke()) finishEditorAction();
+    } else if (editorSettings.selectionShape === "rectangle" && editorRectangleStart && point) {
+      terrainEditSession.selectRectangle(editorRectangleStart, point, editorSettings.selectionMode);
+    }
+    editorRectangleStart = null;
+    editorLastEditPoint = null;
+    updateRectanglePreview(null);
+    editorPointerActive = false;
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  }, true);
+
+  canvas.addEventListener("pointercancel", () => {
+    editorNavigationButton = null;
+    editorNavigationPointerId = null;
+    if (editorEnabled) canvas.style.cursor = "crosshair";
+    if (!editorPointerActive) return;
+    if (editorSettings.workflow === "sculpt") {
+      terrainEditSession.cancelStroke();
+      applyEditedHeightsToMeshes();
+    }
+    editorRectangleStart = null;
+    editorLastEditPoint = null;
+    updateRectanglePreview(null);
+    editorPointerActive = false;
+  }, true);
+
   const replaceTerrainSystem = async (
     nextConfigOverrides: BuiltTerrainConfigOverrides,
     nextTextureOptions: BabylonTerrainTextureOptions
@@ -423,6 +946,7 @@ export function createTerrainDemo(
     const rebuildStartedAt = performance.now();
     try {
       const wireframe = terrainAdapter.getWireframe();
+      const texturesEnabled = terrainAdapter.getTexturesEnabled();
       const debugViewMode = terrainAdapter.getDebugViewMode();
       const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
       const waterLevel = terrainAdapter.getWaterLevel();
@@ -488,6 +1012,8 @@ export function createTerrainDemo(
       terrainAdapter.dispose();
       frameCameraToWorld(camera, nextConfig);
       terrain = nextTerrain;
+      terrainEditSession.replaceTerrain(nextTerrain);
+      lastDerivedEditorRevision = terrainEditSession.getState().revision;
       terrainAdapter = createTerrainAdapter(
         terrain,
         nextTextureOptions,
@@ -496,6 +1022,7 @@ export function createTerrainDemo(
       terrainAdapter.initialize();
       trackAdapterActivity(terrainAdapter, nextBuildVersion);
       terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setTexturesEnabled(texturesEnabled);
       terrainAdapter.setCollisionRadius(
         nextConfigOverrides.collisionRadius ?? collisionRadius
       );
@@ -544,10 +1071,11 @@ export function createTerrainDemo(
     }
   };
 
-  const importTerrainAsset = async (nextTerrain: BuiltTerrain): Promise<void> => {
+  const importTerrainAsset = async (nextTerrain: BuiltTerrain, preserveEditSession = false): Promise<void> => {
     const renderSuspendToken = renderController.suspendRendering();
     try {
       const wireframe = terrainAdapter.getWireframe();
+      const texturesEnabled = terrainAdapter.getTexturesEnabled();
       const debugViewMode = terrainAdapter.getDebugViewMode();
       const terrainMaterialConfig = terrainAdapter.getTerrainMaterialConfig();
       const waterLevel = terrainAdapter.getWaterLevel();
@@ -575,6 +1103,11 @@ export function createTerrainDemo(
       terrainAdapter.dispose();
       frameCameraToWorld(camera, nextTerrain.config);
       terrain = nextTerrain;
+      if (preserveEditSession) terrainEditSession.acceptDerivedTerrain(nextTerrain);
+      else {
+        terrainEditSession.replaceTerrain(nextTerrain);
+        lastDerivedEditorRevision = terrainEditSession.getState().revision;
+      }
       terrainAdapter = createTerrainAdapter(
         terrain,
         textureOptions,
@@ -583,6 +1116,7 @@ export function createTerrainDemo(
       terrainAdapter.initialize();
       trackAdapterActivity(terrainAdapter, nextBuildVersion);
       terrainAdapter.setWireframe(wireframe);
+      terrainAdapter.setTexturesEnabled(texturesEnabled);
       terrainAdapter.setCollisionRadius(collisionRadius);
       terrainAdapter.setFoliageRadius(foliageRadius);
       terrainAdapter.setShowFoliage(showFoliage);
@@ -598,6 +1132,7 @@ export function createTerrainDemo(
       terrainAdapter.setWaterConfig(waterConfig);
       terrainAdapter.setDebugViewMode(debugViewMode);
       terrainAdapter.update(camera.position);
+      updateEditorPickability();
       await Promise.all([
         terrainAdapter.whenChunkMeshesReady(),
         terrainAdapter.whenFoliageReady()
@@ -618,6 +1153,53 @@ export function createTerrainDemo(
     }
   };
 
+  const refreshEditedTerrain = async (options: TerrainDerivedRefreshOptions = {}): Promise<void> => {
+    const revision = terrainEditSession.getState().revision;
+    const editedTerrain = terrainEditSession.getTerrain();
+    const refreshTerrain: BuiltTerrain = {
+      ...editedTerrain,
+      config: {
+        ...editedTerrain.config,
+        buildFoliage: options.buildFoliage ?? editedTerrain.config.buildFoliage,
+        features: {
+          ...editedTerrain.config.features,
+          ...options.features
+        },
+        poi: {
+          ...editedTerrain.config.poi,
+          ...options.poi
+        },
+        rivers: {
+          ...editedTerrain.config.rivers,
+          ...options.rivers
+        }
+      }
+    };
+    const refreshVersion = ++buildVersion;
+    setBuildStatus({ phase: "world", message: "Refreshing edited terrain", completed: 0, total: 1 });
+    const refreshed = await buildCoordinator.rebuildEditedTerrain(refreshTerrain, refreshVersion);
+    if (revision !== terrainEditSession.getState().revision || refreshVersion !== buildVersion) return;
+    await importTerrainAsset(refreshed, true);
+    lastDerivedEditorRevision = revision;
+  };
+
+  const flushTerrainEdits = async (options: TerrainDerivedRefreshOptions = {}): Promise<void> => {
+    applyEditedHeightsToMeshes();
+    const currentConfig = terrainEditSession.getTerrain().config;
+    const derivedConfigChanged =
+      (options.buildFoliage !== undefined && options.buildFoliage !== currentConfig.buildFoliage) ||
+      hasPartialConfigChange(currentConfig.features, options.features) ||
+      hasPartialConfigChange(currentConfig.poi, options.poi) ||
+      hasPartialConfigChange(currentConfig.rivers, options.rivers);
+    if (
+      terrainEditSession.getState().revision !== lastDerivedEditorRevision ||
+      derivedConfigChanged
+    ) {
+      editorRefreshPromise = refreshEditedTerrain(options);
+    }
+    await editorRefreshPromise;
+  };
+
   const mutateScene = <Args extends readonly unknown[]>(
     mutate: (...args: Args) => void
   ): ((...args: Args) => void) => {
@@ -631,13 +1213,52 @@ export function createTerrainDemo(
     engine,
     scene,
     camera,
-    getTerrainAsset: () => terrain,
-    importTerrainAsset,
+    getTerrainAsset: () => terrainEditSession.getTerrain(),
+    getTerrainEditSession: () => terrainEditSession,
+    setEditorEnabled: (enabled: boolean) => {
+      if (!enabled && editorPointerActive) {
+        terrainEditSession.cancelStroke();
+        editorPointerActive = false;
+        editorRectangleStart = null;
+        editorLastEditPoint = null;
+        updateRectanglePreview(null);
+        applyEditedHeightsToMeshes();
+      }
+      editorEnabled = enabled;
+      canvas.style.cursor = enabled ? "crosshair" : "";
+      if (cameraPointerInput) {
+        cameraPointerInput.buttons = enabled
+          ? []
+          : [...defaultCameraPointerButtons];
+      }
+      updateEditorPickability();
+      if (!enabled) updateEditorCursor(null);
+      updateSelectionVisual();
+      renderController.markSceneMutated();
+    },
+    getEditorEnabled: () => editorEnabled,
+    applyTerrainEditChanges: () => {
+      applyEditedHeightsToMeshes();
+      refreshEditedTerrainMaterial();
+      renderController.markSceneMutated();
+    },
+    getEditorDerivedDirty: () =>
+      terrainEditSession.getState().revision !== lastDerivedEditorRevision,
+    setEditorSettings: (settings: TerrainEditorSettings) => {
+      editorSettings = settings;
+      updateSelectionVisual();
+      renderController.markSceneMutated();
+    },
+    getEditorSettings: () => editorSettings,
+    flushTerrainEdits,
+    importTerrainAsset: (nextTerrain) => importTerrainAsset(nextTerrain, false),
     beginRendering: () => renderController.beginRendering(),
     stopRendering: () => renderController.stopRendering(),
     suspendRendering: () => renderController.suspendRendering(),
     markSceneMutated: () => renderController.markSceneMutated(),
     setWireframe: mutateScene((enabled: boolean) => terrainAdapter.setWireframe(enabled)),
+    setTexturesEnabled: mutateScene((enabled: boolean) => terrainAdapter.setTexturesEnabled(enabled)),
+    getTexturesEnabled: () => terrainAdapter.getTexturesEnabled(),
     toggleDebugOverlay: async () => {
       renderActivityState.togglingDebugOverlay = true;
       renderController.markSceneMutated();
@@ -799,4 +1420,13 @@ function hasCameraStateChanged(
     !previous.position.equals(next.position) ||
     !previous.target.equals(next.target)
   );
+}
+
+function hasPartialConfigChange(
+  current: object,
+  next: object | undefined
+): boolean {
+  if (!next) return false;
+  const currentValues = current as Record<string, unknown>;
+  return Object.entries(next).some(([key, value]) => currentValues[key] !== value);
 }

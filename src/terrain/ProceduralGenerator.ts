@@ -53,7 +53,8 @@ export class ProceduralGenerator {
 
   constructor(
     private readonly config: TerrainConfig,
-    snapshot: ProceduralGeneratorSnapshot | null = null
+    snapshot: ProceduralGeneratorSnapshot | null = null,
+    rebuildDerivedFromHeight = false
   ) {
     this.seed = normalizeSeed(config.seed);
     this.worldHalfExtent = config.worldSize * 0.5;
@@ -63,6 +64,49 @@ export class ProceduralGenerator {
     this.analysisStep =
       snapshot?.analysisStep ??
       (config.worldSize / (this.analysisResolution - 1));
+
+    if (snapshot && rebuildDerivedFromHeight) {
+      const heights = cloneField(snapshot.terrainHeightField);
+      if (!heights || heights.length !== this.analysisResolution * this.analysisResolution) {
+        throw new Error("Derived terrain refresh requires a complete height field.");
+      }
+      if (config.rivers.enabled) {
+        const hydrology = buildHydrologyFields(heights, this.analysisResolution, config);
+        this.flowField = hydrology.flow;
+        this.lakeField = hydrology.lake;
+        this.lakeSurfaceField = hydrology.filledHeights;
+        this.riverField = buildRiverField(
+          heights,
+          hydrology.filledHeights,
+          hydrology.flow,
+          hydrology.lake,
+          hydrology.receivers,
+          this.analysisResolution,
+          config
+        );
+        this.sedimentField = buildSedimentField(
+          heights,
+          this.flowField,
+          this.riverField,
+          hydrology.lake,
+          hydrology.receivers,
+          this.analysisResolution,
+          config
+        );
+      } else {
+        this.flowField = buildFlowAccumulationField(heights, this.analysisResolution);
+        this.riverField = null;
+        this.lakeField = null;
+        this.lakeSurfaceField = null;
+        this.sedimentField = null;
+      }
+      const resources = this.buildResourceFields(heights);
+      this.coalField = resources.coal;
+      this.ironField = resources.iron;
+      this.copperField = resources.copper;
+      this.terrainHeightField = heights;
+      return;
+    }
 
     if (snapshot) {
       this.terrainHeightField = cloneField(snapshot.terrainHeightField);

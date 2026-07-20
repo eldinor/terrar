@@ -539,6 +539,11 @@ body {
   padding: 7px 8px;
 }
 
+.editor-smooth-world-panel {
+  display: grid;
+  gap: 7px;
+}
+
 .editor-status {
   color: var(--editor-text-secondary);
   white-space: pre-wrap;

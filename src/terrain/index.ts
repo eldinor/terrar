@@ -9,6 +9,7 @@ export * from "./TerrainFeatureRuntime";
 export * from "./TerrainLODController";
 export * from "./TerrainMeshBuilder";
 export * from "./TerrainChunkMeshRuntime";
+export * from "./TerrainEditSession";
 export * from "./TerrainChunkVisibilityRuntime";
 export * from "./TerrainPoiPlanner";
 export * from "./TerrainRoadPlanner";

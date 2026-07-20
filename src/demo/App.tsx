@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import type {
   FeaturePanelState,
+  EditorPanelState,
   MaterialTabState,
   PanelTab,
   RuntimeTabState,
@@ -10,6 +11,8 @@ import type {
 } from "./demoSnapshots";
 import { useDemoBridge } from "./useDemoBridge";
 import "./app.css";
+
+declare const __PACKAGE_VERSION__: string;
 
 interface TerrainPresetOption {
   readonly name: string;
@@ -160,6 +163,8 @@ export function App() {
     setForceLod0(nextValue);
   };
 
+  const editorState = snapshot.editorPanelState;
+
   return (
     <>
       <div id="app" />
@@ -174,13 +179,24 @@ export function App() {
       />
       {snapshot.headerActionsMount
         ? createPortal(
-            <button
-              className="editor-button editor-button-header"
-              onClick={() => void handleRebuildTerrain()}
-              type="button"
-            >
-              Rebuild Terrain
-            </button>,
+            <>
+              <button
+                className="editor-button editor-button-header"
+                onClick={() => void handleRebuildTerrain()}
+                type="button"
+              >
+                Rebuild Terrain
+              </button>
+              {editorState ? (
+                <button
+                  className={cx("editor-button", "editor-button-header", editorState.enabled && "is-active")}
+                  onClick={() => bridge?.setEditorEnabled(!editorState.enabled)}
+                  type="button"
+                >
+                  Editor Mode {editorState.enabled ? "On" : "Off"} (E) · v{__PACKAGE_VERSION__} alpha
+                </button>
+              ) : null}
+            </>,
             snapshot.headerActionsMount,
           )
         : null}
@@ -233,12 +249,21 @@ export function App() {
         : null}
       {snapshot.featurePanelMount && snapshot.featurePanelState
         ? createPortal(
-            <FeaturePanel
-              onApplyFeatures={handleRebuildTerrain}
-              onChange={handleFeaturePanelChange}
-              state={snapshot.featurePanelState}
-              statusText={snapshot.featureStatusText}
-            />,
+            editorState?.enabled ? (
+              <EditorPanel bridge={bridge} state={editorState} />
+            ) : (
+              <FeaturePanel
+                editorState={editorState}
+                onApplyFeatures={handleRebuildTerrain}
+                onChange={handleFeaturePanelChange}
+                onRefreshFeatures={() => bridge?.refreshEditorFeatures()}
+                onSmoothWorld={(strength, passes, refreshFeatures) =>
+                  bridge?.smoothWorld(strength, passes, refreshFeatures)
+                }
+                state={snapshot.featurePanelState}
+                statusText={snapshot.featureStatusText}
+              />
+            ),
             snapshot.featurePanelMount,
           )
         : null}
@@ -274,6 +299,67 @@ export function App() {
           )
         : null}
     </>
+  );
+}
+
+function EditorPanel({ bridge, state }: { readonly bridge: ReturnType<typeof useDemoBridge>["bridge"]; readonly state: EditorPanelState }) {
+  const updateSettings = (patch: Partial<EditorPanelState["settings"]>): void => {
+    bridge?.setEditorSettings({ ...state.settings, ...patch });
+  };
+  const updateBrush = (patch: Partial<EditorPanelState["settings"]["brush"]>): void => {
+    updateSettings({ brush: { ...state.settings.brush, ...patch } });
+  };
+  return (
+    <div className="editor-panel-content">
+      <div className="editor-heading">Terrain Editor</div>
+      <SelectField label="Workflow" value={state.settings.workflow} options={[["Sculpt", "sculpt"], ["Select", "select"]]} onChange={(value) => updateSettings({ workflow: value as EditorPanelState["settings"]["workflow"] })} />
+      <div className="editor-tab-bar">
+        {(["raise", "lower", "smooth"] as const).map((tool) => (
+          <button className={cx("editor-tab", state.settings.tool === tool && "is-active")} key={tool} onClick={() => updateSettings({ tool })} type="button">
+            {tool[0].toUpperCase() + tool.slice(1)}
+          </button>
+        ))}
+      </div>
+      <SliderField label="Radius" min={2} max={240} step={1} value={state.settings.brush.radius} onChange={(radius) => updateBrush({ radius })} />
+      <SliderField label="Strength" min={0.1} max={10} step={0.1} value={state.settings.brush.strength} onChange={(strength) => updateBrush({ strength })} />
+      <SliderField label="Hardness" min={0} max={1} step={0.05} value={state.settings.brush.hardness} onChange={(hardness) => updateBrush({ hardness })} />
+      {state.settings.workflow === "select" ? (
+        <>
+          <div className="editor-status">
+            Selected: {state.selectedSampleCount.toLocaleString()} samples. Selected ground is shown in cyan.
+          </div>
+          <SelectField label="Selection Shape" value={state.settings.selectionShape} options={[["Brush", "brush"], ["Rectangle", "rectangle"]]} onChange={(value) => updateSettings({ selectionShape: value as EditorPanelState["settings"]["selectionShape"] })} />
+          <SelectField label="Selection Mode" value={state.settings.selectionMode} options={[["Add", "add"], ["Subtract", "subtract"]]} onChange={(value) => updateSettings({ selectionMode: value as EditorPanelState["settings"]["selectionMode"] })} />
+          <div className="editor-row-grid">
+            <button className="editor-button" onClick={() => bridge?.selectAllEditorTerrain()} type="button">Select All</button>
+            <button className="editor-button" disabled={!state.hasSelection} onClick={() => bridge?.clearEditorSelection()} type="button">Clear</button>
+          </div>
+          <button className="editor-button is-active" disabled={!state.hasSelection} onClick={() => bridge?.applyEditorSelection()} type="button">Apply {state.settings.tool}</button>
+        </>
+      ) : null}
+      <div className="editor-divider" />
+      <button
+        className={cx("editor-button", state.derivedDirty && "is-active")}
+        disabled={!state.derivedDirty}
+        onClick={() => void bridge?.refreshEditorFeatures()}
+        type="button"
+      >
+        {state.derivedDirty ? "Refresh Features" : "Features Up to Date"}
+      </button>
+      {state.derivedDirty ? (
+        <div className="editor-status">Terrain chunks are updated. Rivers, roads, water, POIs, and foliage are waiting for refresh.</div>
+      ) : null}
+      <div className="editor-row-grid">
+        <button className="editor-button" disabled={!state.canUndo} onClick={() => bridge?.undoTerrainEdit()} type="button">Undo</button>
+        <button className="editor-button" disabled={!state.canRedo} onClick={() => bridge?.redoTerrainEdit()} type="button">Redo</button>
+      </div>
+      <div className="editor-status">
+        {state.settings.workflow === "select"
+          ? "Left-drag paints or draws the selection. Choose Add/Subtract, then Apply the active terrain tool."
+          : "Left-drag sculpts inside the visible brush ring."}
+        {" Right-drag orbits, middle-drag pans, wheel zooms."}
+      </div>
+    </div>
   );
 }
 
@@ -408,15 +494,31 @@ function LeftPanel({
 }
 
 interface FeaturePanelProps {
+  readonly editorState: EditorPanelState | null;
   readonly onApplyFeatures: () => void | Promise<void>;
   readonly onChange: (state: FeaturePanelState) => void;
+  readonly onRefreshFeatures: () => void | Promise<void>;
+  readonly onSmoothWorld: (strength: number, passes: number, refreshFeatures: boolean) => void | Promise<void>;
   readonly state: FeaturePanelState;
   readonly statusText: string;
 }
 
-function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeaturePanelProps) {
+function FeaturePanel({ editorState, onApplyFeatures, onChange, onRefreshFeatures, onSmoothWorld, state, statusText }: FeaturePanelProps) {
+  const [smoothStrength, setSmoothStrength] = useState(0.35);
+  const [smoothPasses, setSmoothPasses] = useState(2);
+  const [refreshAfterSmoothing, setRefreshAfterSmoothing] = useState(false);
+  const [smoothingWorld, setSmoothingWorld] = useState(false);
   const update = (updater: (current: FeaturePanelState) => FeaturePanelState) => {
     onChange(updater(state));
+  };
+  const handleSmoothWorld = async (): Promise<void> => {
+    if (smoothingWorld) return;
+    setSmoothingWorld(true);
+    try {
+      await onSmoothWorld(smoothStrength, smoothPasses, refreshAfterSmoothing);
+    } finally {
+      setSmoothingWorld(false);
+    }
   };
 
   return (
@@ -469,6 +571,47 @@ function FeaturePanel({ onApplyFeatures, onChange, state, statusText }: FeatureP
       >
         Apply Features
       </button>
+
+      <div className="editor-divider" />
+      <div className="editor-card editor-smooth-world-panel">
+        <div className="editor-section-label" style={{ marginTop: 0 }}>World Smoothing</div>
+        <SliderField label="Strength" min={0.05} max={1} step={0.05} value={smoothStrength} onChange={setSmoothStrength} />
+        <SliderField label="Passes" min={1} max={8} step={1} value={smoothPasses} onChange={setSmoothPasses} />
+        <label className="editor-checkbox-row">
+          <input
+            className="editor-checkbox-input"
+            checked={refreshAfterSmoothing}
+            onChange={(event) => setRefreshAfterSmoothing(event.target.checked)}
+            type="checkbox"
+          />
+          <span className="editor-checkbox-box" />
+          <span>Refresh Features After</span>
+        </label>
+        <button
+          className="editor-button is-active"
+          disabled={smoothingWorld}
+          onClick={() => void handleSmoothWorld()}
+          style={topMarginStyle}
+          type="button"
+        >
+          {smoothingWorld ? "Smoothing World..." : "Smooth World"}
+        </button>
+        <div className="editor-status" style={topMarginStyle}>
+          {editorState?.derivedDirty
+            ? "Terrain changed. Click Refresh World Features to regenerate rivers, water, roads, POIs, resources, and foliage."
+            : "Smooths the full heightfield as one undoable edit."}
+        </div>
+        {editorState?.derivedDirty ? (
+          <button
+            className="editor-button"
+            disabled={smoothingWorld}
+            onClick={() => void onRefreshFeatures()}
+            type="button"
+          >
+            Refresh World Features
+          </button>
+        ) : null}
+      </div>
 
       {state.features.poi ? (
         <>

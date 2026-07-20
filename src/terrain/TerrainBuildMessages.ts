@@ -1,5 +1,6 @@
 import type { TerrainConfig, TerrainLODLevel } from "./TerrainConfig";
 import type { TerrainPoiKind } from "./TerrainPoiPlanner";
+import type { ProceduralGeneratorSnapshot } from "./ProceduralGenerator";
 export interface SerializedPoint3 {
   readonly x: number;
   readonly y: number;
@@ -59,6 +60,14 @@ export interface BuildWorldRequest {
   readonly buildVersion: number;
   readonly config: TerrainConfig;
   readonly preferSharedSnapshot: boolean;
+}
+
+export interface RebuildEditedWorldRequest {
+  readonly type: "rebuildEditedWorld";
+  readonly buildVersion: number;
+  readonly config: TerrainConfig;
+  readonly preferSharedSnapshot: boolean;
+  readonly snapshot: ProceduralGeneratorSnapshot;
 }
 
 export interface BuildWorldSuccessResponse {
@@ -123,7 +132,7 @@ export interface ChunkBuildErrorResponse {
   readonly message: string;
 }
 
-export type WorldBuildWorkerRequest = BuildWorldRequest;
+export type WorldBuildWorkerRequest = BuildWorldRequest | RebuildEditedWorldRequest;
 
 export type WorldBuildWorkerResponse =
   | BuildWorldSuccessResponse

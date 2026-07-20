@@ -87,6 +87,8 @@ export interface BabylonTerrainAdapter {
   toggleDebugOverlay(): Promise<boolean>;
   setWireframe(enabled: boolean): void;
   getWireframe(): boolean;
+  setTexturesEnabled(enabled: boolean): void;
+  getTexturesEnabled(): boolean;
   setWaterLevel(level: number): void;
   getWaterLevel(): number;
   setWaterConfig(config: BabylonTerrainWaterConfig): void;

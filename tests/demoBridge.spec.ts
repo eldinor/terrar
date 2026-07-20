@@ -18,6 +18,7 @@ import type {
   TerrainPerformanceStats,
 } from "../src/demo/createTerrainDemo";
 import type { RenderSuspendToken } from "../src/adapters/babylon";
+import type { TerrainEditSession } from "../src/terrain/TerrainEditSession";
 
 class FakeElement {
   id = "";
@@ -195,6 +196,23 @@ function createTerrainDemoStub(): DemoStub {
     total: 0,
   };
   const listeners = new Set<(status: TerrainBuildStatus) => void>();
+  let editorEnabled = false;
+  let editorSettings = {
+    workflow: "sculpt" as const,
+    tool: "raise" as const,
+    selectionShape: "brush" as const,
+    selectionMode: "add" as const,
+    brush: { radius: 40, strength: 1, hardness: 0 },
+  };
+  const editSession = {
+    getState: () => ({ canUndo: false, canRedo: false, hasSelection: false, selectedSampleCount: 0, revision: 0 }),
+    subscribe: vi.fn(() => () => {}),
+    applyToSelection: vi.fn(() => false),
+    clearSelection: vi.fn(),
+    selectAll: vi.fn(),
+    undo: vi.fn(() => false),
+    redo: vi.fn(() => false),
+  } as unknown as TerrainEditSession;
 
   return {
     engine: {} as TerrainDemo["engine"],
@@ -210,12 +228,22 @@ function createTerrainDemoStub(): DemoStub {
       poiSites: [],
       roads: [],
     } as unknown as ReturnType<TerrainDemo["getTerrainAsset"]>)),
+    getTerrainEditSession: () => editSession,
+    setEditorEnabled: vi.fn((enabled: boolean) => { editorEnabled = enabled; }),
+    getEditorEnabled: () => editorEnabled,
+    setEditorSettings: vi.fn((settings) => { editorSettings = settings; }),
+    getEditorSettings: () => editorSettings,
+    flushTerrainEdits: vi.fn(async () => {}),
+    applyTerrainEditChanges: vi.fn(),
+    getEditorDerivedDirty: () => false,
     importTerrainAsset: vi.fn(async () => {}),
     beginRendering: vi.fn(),
     stopRendering: vi.fn(),
     suspendRendering: vi.fn(() => noopSuspendToken),
     markSceneMutated: vi.fn(),
     setWireframe: vi.fn(),
+    setTexturesEnabled: vi.fn(),
+    getTexturesEnabled: () => true,
     toggleDebugOverlay: vi.fn(async () => true),
     setWaterLevel: vi.fn((level: number) => {
       waterLevel = level;
@@ -398,6 +426,43 @@ describe("demo bridge", () => {
     unsubscribe();
   });
 
+  it("toggles the untextured terrain view with T and reports it in the footer", async () => {
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+
+    const keydownListener = vi.mocked(window.addEventListener).mock.calls.find(
+      ([eventName]) => eventName === "keydown",
+    )?.[1] as EventListener;
+    await keydownListener({ key: "t", repeat: false, target: null } as unknown as KeyboardEvent);
+
+    expect(demo.setTexturesEnabled).toHaveBeenCalledWith(false);
+    expect(bridgeModule.getSnapshot().hudText).toContain("T textures: off");
+  });
+
+  it("toggles Editor Mode with E", async () => {
+    const bridgeModule = await importBridgeModule();
+    const demo = createTerrainDemoStub();
+    const headerActions = document.createElement("div") as unknown as HTMLDivElement;
+    const headerTrailingActions = document.createElement("div") as unknown as HTMLDivElement;
+    const footer = document.createElement("div") as unknown as HTMLDivElement;
+    const panel = document.createElement("div") as unknown as HTMLDivElement;
+    const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
+    bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
+    const keydownListener = vi.mocked(window.addEventListener).mock.calls.find(
+      ([eventName]) => eventName === "keydown",
+    )?.[1] as EventListener;
+    await keydownListener({ key: "e", repeat: false, target: null } as unknown as KeyboardEvent);
+    expect(demo.setEditorEnabled).toHaveBeenCalledWith(true);
+    expect(bridgeModule.getSnapshot().editorPanelState?.enabled).toBe(true);
+  });
+
   it("updates feature state through the bridge without leaking Babylon state into React", async () => {
     const bridgeModule = await importBridgeModule();
     const demo = createTerrainDemoStub();
@@ -537,7 +602,7 @@ describe("demo bridge", () => {
     const featurePanel = document.createElement("div") as unknown as HTMLDivElement;
 
     bridgeModule.initializeDemoBridge({ demo, headerActions, headerTrailingActions, footer, panel, featurePanel });
-    bridgeModule.exportTerrainBundle();
+    await bridgeModule.exportTerrainBundle();
 
     expect(window.URL.createObjectURL).toHaveBeenCalled();
     expect(bridgeModule.getSnapshot().hudText).toContain("terrain zip downloaded");
